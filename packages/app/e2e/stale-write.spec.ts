@@ -5,7 +5,6 @@ import {
   codeEditor,
   createMarkdownProject,
   documentSaveStatus,
-  fileConflictNotice,
   logE2eEvent,
   openMarkdownFile,
   readProjectFile,
@@ -24,7 +23,7 @@ test.describe("stale writes", () => {
     removeMarkdownProject(projectDir);
   });
 
-  test("surfaces a save conflict when the file changed externally @smoke", async ({
+  test("reloads the disk version after a stale autosave @smoke", async ({
     page,
   }) => {
     await page.route("**/api/markdown-file/events**", (route) => route.abort());
@@ -41,63 +40,20 @@ test.describe("stale writes", () => {
     fs.writeFileSync(filePath, "# Conflict\n\nExternal body.\n");
     await appendInCodeEditor(page, "\nLocal body.\n");
 
-    await expect(documentSaveStatus(page)).toContainText("Save conflict");
-    await expect(page.getByTestId("file-conflict-action-reload")).toBeVisible();
-    await expect(
-      page.getByTestId("file-conflict-action-keep-editing"),
-    ).toBeVisible();
+    await expect(documentSaveStatus(page)).toContainText("Saved");
+    await expect(page.getByTestId("file-conflict-notice")).toBeHidden();
+    await expect(codeEditor(page)).toContainText("External body.");
+    await expect(codeEditor(page)).not.toContainText("Local body.");
     expect(readProjectFile(projectDir, "conflict.md")).toBe(
       "# Conflict\n\nExternal body.\n",
     );
 
-    await page.getByTestId("file-conflict-action-keep-editing").click();
-    await expect(documentSaveStatus(page)).toContainText("Autosave paused");
-    await appendInCodeEditor(page, "\nStill local.\n");
-    await expect(codeEditor(page)).toContainText("Local body.");
-    await expect(codeEditor(page)).toContainText("Still local.");
-    await expect
-      .poll(() => readProjectFile(projectDir, "conflict.md"))
-      .toBe("# Conflict\n\nExternal body.\n");
-
-    logE2eEvent("stale-write.conflict-surfaced", {
+    logE2eEvent("stale-write.disk-version-reloaded", {
       file: "conflict.md",
     });
   });
 
-  test("overwrite after conflict marks the current draft saved", async ({
-    page,
-  }) => {
-    await page.route("**/api/markdown-file/events**", (route) => route.abort());
-
-    const filePath = writeProjectFile(
-      projectDir,
-      "overwrite-conflict.md",
-      "# Conflict\n\nOriginal body.\n",
-    );
-
-    await openMarkdownFile(page, filePath, "code");
-    await expect(codeEditor(page)).toContainText("Original body.");
-
-    fs.writeFileSync(filePath, "# Conflict\n\nExternal body.\n");
-    await appendInCodeEditor(page, "\nLocal overwrite body.\n");
-
-    await expect(documentSaveStatus(page)).toContainText("Save conflict");
-    await page.getByTestId("file-conflict-action-overwrite").click();
-
-    await expect
-      .poll(() => readProjectFile(projectDir, "overwrite-conflict.md"))
-      .toContain("Local overwrite body.");
-    await expect(documentSaveStatus(page)).toContainText("Saved");
-    await expect(documentSaveStatus(page)).not.toContainText("Save failed");
-    await expect(documentSaveStatus(page)).not.toContainText("Unsaved changes");
-
-    logE2eEvent("stale-write.overwrite-saved", {
-      file: "overwrite-conflict.md",
-      size: fs.statSync(filePath).size,
-    });
-  });
-
-  test("manual save preserves expected-version conflict behavior", async ({
+  test("manual save reloads the disk version when the expected version is stale", async ({
     page,
   }) => {
     await page.route("**/api/markdown-file/events**", (route) => route.abort());
@@ -117,20 +73,20 @@ test.describe("stale writes", () => {
       process.platform === "darwin" ? "Meta+S" : "Control+S",
     );
 
-    await expect(documentSaveStatus(page)).toContainText("Save conflict");
-    await expect(fileConflictNotice(page)).toContainText(
-      "This file changed on disk while you have unsaved edits.",
-    );
+    await expect(documentSaveStatus(page)).toContainText("Saved");
+    await expect(page.getByTestId("file-conflict-notice")).toBeHidden();
+    await expect(codeEditor(page)).toContainText("External body.");
+    await expect(codeEditor(page)).not.toContainText("Local body.");
     expect(readProjectFile(projectDir, "manual-conflict.md")).toBe(
       "# Manual Conflict\n\nExternal body.\n",
     );
 
-    logE2eEvent("stale-write.manual-conflict", {
+    logE2eEvent("stale-write.manual-disk-version-reloaded", {
       file: "manual-conflict.md",
     });
   });
 
-  test("rejects autosave after external content changes with stable metadata", async ({
+  test("reloads external content with stable file metadata", async ({
     page,
   }) => {
     const fixedTimestamp = new Date("2026-01-01T00:00:00.000Z");
@@ -148,63 +104,19 @@ test.describe("stale writes", () => {
     fs.utimesSync(filePath, fixedTimestamp, fixedTimestamp);
     await appendInCodeEditor(page, "\nLocal body.\n");
 
-    await expect(documentSaveStatus(page)).toContainText("Save conflict");
+    await expect(documentSaveStatus(page)).toContainText("Saved");
+    await expect(page.getByTestId("file-conflict-notice")).toBeHidden();
+    await expect(codeEditor(page)).toContainText("External");
     expect(readProjectFile(projectDir, "metadata-conflict.md")).toBe(
       "# External\n",
     );
 
-    logE2eEvent("stale-write.metadata-conflict-surfaced", {
+    logE2eEvent("stale-write.metadata-disk-version-reloaded", {
       file: "metadata-conflict.md",
     });
   });
 
-  test("keeps explanatory conflict choices visible while scrolled in a long document", async ({
-    page,
-  }) => {
-    await page.route("**/api/markdown-file/events**", (route) => route.abort());
-
-    const longBody = Array.from(
-      { length: 120 },
-      (_, index) => `Paragraph ${index + 1}: local review text.`,
-    ).join("\n\n");
-    const filePath = writeProjectFile(
-      projectDir,
-      "long-conflict.md",
-      `# Long conflict\n\n${longBody}\n`,
-    );
-
-    await openMarkdownFile(page, filePath, "code");
-    await expect(codeEditor(page)).toContainText("Paragraph 1");
-
-    await codeEditor(page).click();
-    await page.keyboard.press(
-      process.platform === "darwin" ? "Meta+End" : "Control+End",
-    );
-    fs.writeFileSync(
-      filePath,
-      "# Long conflict\n\nExternal body from another editor.\n",
-    );
-    await page.keyboard.type("\nLocal draft at the bottom.\n");
-
-    const conflictNotice = fileConflictNotice(page);
-    await expect(conflictNotice).toBeVisible();
-    await expect(conflictNotice).toHaveCSS("position", "fixed");
-    await expect(conflictNotice).toContainText(
-      "This file changed on disk while you have unsaved edits.",
-    );
-    await expect(conflictNotice).toContainText(
-      "Autosave is paused so your draft will not overwrite those changes.",
-    );
-    await expect(page.getByTestId("file-conflict-action-reload")).toBeVisible();
-    await expect(
-      page.getByTestId("file-conflict-action-keep-editing"),
-    ).toBeVisible();
-    await expect(
-      page.getByTestId("file-conflict-action-overwrite"),
-    ).toBeVisible();
-  });
-
-  test("keeps conflict banner and save status stack from overlapping", async ({
+  test("keeps the status stack unobstructed without a conflict banner", async ({
     page,
   }) => {
     await page.route("**/api/markdown-file/events**", (route) => route.abort());
@@ -227,29 +139,9 @@ test.describe("stale writes", () => {
       fs.writeFileSync(filePath, "# Layout conflict\n\nExternal body.\n");
       await appendInCodeEditor(page, `\nLocal body ${viewport.width}.\n`);
 
-      const conflictNotice = fileConflictNotice(page);
-      const statusStack = page.getByTestId("document-status-stack");
-      await expect(conflictNotice).toBeVisible();
-      await expect(statusStack).toBeVisible();
-
-      const conflictBox = await conflictNotice.boundingBox();
-      const stackBox = await statusStack.boundingBox();
-      expect(conflictBox).not.toBeNull();
-      expect(stackBox).not.toBeNull();
-
-      if (!conflictBox || !stackBox) {
-        throw new Error("Expected conflict and status stack bounds");
-      }
-
-      const intersects =
-        conflictBox.x < stackBox.x + stackBox.width &&
-        conflictBox.x + conflictBox.width > stackBox.x &&
-        conflictBox.y < stackBox.y + stackBox.height &&
-        conflictBox.y + conflictBox.height > stackBox.y;
-
-      expect(intersects).toBe(false);
-      await page.getByTestId("file-conflict-action-reload").click();
-      await expect(conflictNotice).toBeHidden();
+      await expect(page.getByTestId("file-conflict-notice")).toBeHidden();
+      await expect(page.getByTestId("document-status-stack")).toBeVisible();
+      await expect(documentSaveStatus(page)).toContainText("Saved");
     }
   });
 });

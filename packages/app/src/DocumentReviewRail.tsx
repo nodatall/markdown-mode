@@ -1,7 +1,9 @@
 import type { Editor } from "@tiptap/react";
-import { Check, Reply, X } from "lucide-react";
+import { Check, X } from "lucide-react";
 import {
   type CSSProperties,
+  type Dispatch,
+  type SetStateAction,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -10,10 +12,10 @@ import {
   useState,
 } from "react";
 import {
-  CommentEditorList,
   type CommentActionDefinition,
   type CommentActionsRenderContext,
   type CommentContentRenderContext,
+  CommentEditorList,
 } from "./CommentEditorList";
 import type {
   CriticChangeAttrs,
@@ -58,18 +60,21 @@ interface DocumentReviewRailProps {
   testId?: string;
   onDeleteComment: (commentId: string) => void;
   onUpdateComment: (commentId: string, nextContent: string) => void;
-  onReplyComment: (commentId: string) => void;
   onSelectComment: (commentId: string) => void;
   onFocusComment: (commentId: string) => void;
   onHoverComment: (commentId: string | null) => void;
   onAcceptSuggestion: (changeId: string) => void;
   onRejectSuggestion: (changeId: string) => void;
-  onReplySuggestion: (changeId: string) => void;
   onSelectSuggestion: (changeId: string) => void;
   onFocusSuggestion: (changeId: string) => void;
   onHoverSuggestion: (changeId: string | null) => void;
   pendingFocusCommentId?: string | null;
   onAutoFocusComment?: (commentId: string) => void;
+  drafts?: Record<string, string>;
+  onDraftsChange?: Dispatch<SetStateAction<Record<string, string>>>;
+  editingCommentIds?: string[];
+  onEditingCommentIdsChange?: Dispatch<SetStateAction<string[]>>;
+  workingCommentIds?: ReadonlySet<string>;
   draftSuggestion?: DraftSuggestionState | null;
   onDraftSuggestionTextChange?: (text: string) => void;
   onApplyDraftSuggestion?: () => void;
@@ -187,18 +192,21 @@ export function DocumentReviewRail({
   testId,
   onDeleteComment,
   onUpdateComment,
-  onReplyComment,
   onSelectComment,
   onFocusComment,
   onHoverComment,
   onAcceptSuggestion,
   onRejectSuggestion,
-  onReplySuggestion,
   onSelectSuggestion,
   onFocusSuggestion,
   onHoverSuggestion,
   pendingFocusCommentId = null,
   onAutoFocusComment,
+  drafts,
+  onDraftsChange,
+  editingCommentIds,
+  onEditingCommentIdsChange,
+  workingCommentIds,
   draftSuggestion = null,
   onDraftSuggestionTextChange,
   onApplyDraftSuggestion,
@@ -467,12 +475,15 @@ export function DocumentReviewRail({
                   hoveredCommentId={hoveredCommentId}
                   onDeleteComment={onDeleteComment}
                   onUpdateComment={onUpdateComment}
-                  onReplyComment={onReplyComment}
                   onSelectComment={onSelectComment}
-                  onFocusComment={onFocusComment}
                   onHoverComment={onHoverComment}
                   pendingFocusCommentId={pendingFocusCommentId}
                   onAutoFocusComment={onAutoFocusComment}
+                  drafts={drafts}
+                  onDraftsChange={onDraftsChange}
+                  editingCommentIds={editingCommentIds}
+                  onEditingCommentIdsChange={onEditingCommentIdsChange}
+                  workingCommentIds={workingCommentIds}
                 />
               </div>
             );
@@ -566,24 +577,10 @@ export function DocumentReviewRail({
           const suggestionComments = suggestion.commentIds
             .map((commentId) => comments.get(commentId))
             .filter((comment): comment is CriticComment => Boolean(comment));
-          const suggestionCommentIds = new Set(
-            suggestionComments.map((comment) => comment.id),
-          );
-          const normalizedSuggestionComments = suggestionComments.map(
-            (comment) =>
-              comment.parentCommentId === suggestion.changeId ||
-              (comment.parentCommentId &&
-                suggestionCommentIds.has(comment.parentCommentId))
-                ? comment
-                : {
-                    ...comment,
-                    parentCommentId: suggestion.changeId,
-                  },
-          );
           const suggestionRootComment = getSuggestionRootComment(suggestion);
           const suggestionThreadComments = [
             suggestionRootComment,
-            ...normalizedSuggestionComments,
+            ...suggestionComments,
           ];
           const renderCommentContent = ({
             comment,
@@ -619,16 +616,6 @@ export function DocumentReviewRail({
                     onClick: (event) => {
                       event.stopPropagation();
                       onRejectSuggestion(suggestion.changeId);
-                    },
-                  },
-                  {
-                    key: "reply",
-                    label: "Reply",
-                    icon: <Reply className="size-3.5" />,
-                    compact: true,
-                    onClick: (event) => {
-                      event.stopPropagation();
-                      onReplySuggestion(suggestion.changeId);
                     },
                   },
                 ]
@@ -667,14 +654,6 @@ export function DocumentReviewRail({
                 }
                 onDeleteComment={onDeleteComment}
                 onUpdateComment={onUpdateComment}
-                onReplyComment={(commentId) => {
-                  if (commentId === suggestion.changeId) {
-                    onReplySuggestion(suggestion.changeId);
-                    return;
-                  }
-
-                  onReplyComment(commentId);
-                }}
                 onSelectComment={(commentId) => {
                   if (commentId === suggestion.changeId) {
                     onSelectSuggestion(suggestion.changeId);
@@ -682,14 +661,6 @@ export function DocumentReviewRail({
                   }
 
                   onSelectComment(commentId);
-                }}
-                onFocusComment={(commentId) => {
-                  if (commentId === suggestion.changeId) {
-                    onFocusSuggestion(suggestion.changeId);
-                    return;
-                  }
-
-                  onFocusComment(commentId);
                 }}
                 onHoverComment={(commentId) => {
                   if (commentId === suggestion.changeId) {
@@ -701,6 +672,14 @@ export function DocumentReviewRail({
                 }}
                 pendingFocusCommentId={pendingFocusCommentId}
                 onAutoFocusComment={onAutoFocusComment}
+                drafts={drafts}
+                onDraftsChange={onDraftsChange}
+                editingCommentIds={editingCommentIds}
+                onEditingCommentIdsChange={onEditingCommentIdsChange}
+                workingCommentIds={workingCommentIds}
+                isCommentEditable={(comment) =>
+                  comment.id !== suggestion.changeId
+                }
                 renderCommentContent={renderCommentContent}
                 getCommentActions={getCommentActions}
               />

@@ -16,7 +16,7 @@ const FORMAT_EXAMPLES: FormatExample[] = [
     id: "plan-review",
     label: "Review a plan",
     markdown:
-      '# Homepage Conversion Plan\nGoal: make the homepage workflow story and Markdown proof feel like one continuous example.\n\nMove the workflow story above {=="It\'s just Markdown."==}{>>This should go above "It\'s just Markdown."<<}{id="c1" by="Nora" at="2026-04-28T12:10:00.000Z"}{>>Sounds good. I\'ll move it above that section.<<}{id="c2" by="AI" at="2026-04-28T12:11:00.000Z" re="c1"}\n\n{~~Review an agent\'s plan~>Review a homepage plan~~}{id="s1" by="Nora" at="2026-04-28T12:12:00.000Z"} before it starts coding.\n\nKeep the format section as proof that the review data is portable Markdown.\n',
+      '# Homepage Conversion Plan\nGoal: make the homepage workflow story and Markdown proof feel like one continuous example.\n\nMove the workflow story above {=="It\'s just Markdown."==}{>>This should go above "It\'s just Markdown."<<}{id="c1" by="Nora" at="2026-04-28T12:10:00.000Z"}\n\n{~~Review an agent\'s plan~>Review a homepage plan~~}{id="s1" by="Nora" at="2026-04-28T12:12:00.000Z"} before it starts coding.\n\nKeep the format section as proof that the review data is portable Markdown.\n',
   },
   {
     id: "spec-review",
@@ -28,7 +28,7 @@ const FORMAT_EXAMPLES: FormatExample[] = [
     id: "writing-edit",
     label: "Edit writing",
     markdown:
-      '## Draft Intro\nRoughdraft lets me stay in flow while an agent marks up {==my argument==}{>>AI: this is the claim readers need to understand first.<<}{id="c1" by="AI" at="2026-04-28T12:20:00.000Z"}.\n\nIt turns feedback from {~~a confusing pile of notes~>specific comments and suggested edits inside the Markdown file~~}{id="s1" by="AI" at="2026-04-28T12:21:00.000Z"}{>>User: keep the plain-English phrasing, but avoid making it sound like a docs product.<<}{id="c2" by="user" at="2026-04-28T12:22:00.000Z" re="s1"}.\n',
+      '## Draft Intro\nRoughdraft lets me stay in flow while an agent marks up {==my argument==}{>>AI: this is the claim readers need to understand first.<<}{id="c1" by="AI" at="2026-04-28T12:20:00.000Z"}.\n\nIt turns feedback from {~~a confusing pile of notes~>specific comments and suggested edits inside the Markdown file~~}{id="s1" by="AI" at="2026-04-28T12:21:00.000Z"}.\n',
   },
 ];
 
@@ -125,7 +125,7 @@ export function RoughdraftFormatDemo() {
             >
               CriticMarkup
             </a>
-            , to support full comment threads, and suggesting changes. Read the{" "}
+            , to support portable comments and suggested changes. Read the{" "}
             <a
               className="font-bold text-slate-950 underline decoration-slate-300 underline-offset-4 hover:decoration-slate-950 dark:text-slate-50 dark:decoration-slate-600 dark:hover:decoration-slate-50"
               href="/roughdraft-flavored-markdown"

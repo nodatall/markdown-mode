@@ -4,8 +4,8 @@ import {
   Check,
   CodeXml,
   Copy,
-  Eye,
   ExternalLink,
+  Eye,
   FileText,
   MessageSquare,
   PencilLine,
@@ -22,7 +22,6 @@ import {
   useState,
 } from "react";
 import {
-  buildLocationForDocumentEditorViewMode,
   type DocumentEditorViewMode,
   formatWorkspacePathForDisplay,
   getDocumentEditorViewModeFromLocation,
@@ -44,13 +43,14 @@ import {
   DialogTrigger,
 } from "./components/ui/dialog";
 import { DocumentWorkspace } from "./DocumentWorkspace";
+import { detectBackend } from "./detect-backend";
 import {
   getCommentAnchorMeasurements,
   groupCommentAnchorMeasurements,
   normalizeCommentMeasurement,
   resolveAnchoredRailLayouts,
 } from "./document-comments";
-import { detectBackend } from "./detect-backend";
+import { cn } from "./lib/utils";
 import type { DocumentSaveState } from "./PageCard";
 import { PreviewBackend } from "./preview-backend";
 import { RoughdraftFormatDemo } from "./RoughdraftFormatDemo";
@@ -59,9 +59,14 @@ import {
   type Page,
   type StorageBackend,
 } from "./storage";
+import {
+  isTauriBackend,
+  isTauriRuntime,
+  type TauriBackend,
+  type TauriMarkdownFile,
+} from "./tauri-backend";
 import { UpdateNotice } from "./UpdateNotice";
 import { fetchUpdateStatus, type UpdateStatus } from "./update-status";
-import { cn } from "./lib/utils";
 
 export type DocumentDiskChangeState =
   | "clean"
@@ -101,7 +106,7 @@ const PREVIEW_INITIAL_MARKDOWN = [
   "- Comments and suggested changes use Roughdraft flavored Markdown.",
   "- Autosave updates the in-memory document, not disk or browser storage.",
   "",
-  '{==Select this sentence==}{>>Try replying to this comment or suggesting a replacement.<<}{id="preview-comment" by="Roughdraft" at="2026-04-28T12:00:00.000Z"}',
+  '{==Select this sentence==}{>>Try commenting here or suggesting a replacement.<<}{id="preview-comment" by="Roughdraft" at="2026-04-28T12:00:00.000Z"}',
   "",
 ].join("\n");
 const HOMEPAGE_WORKFLOW_SCENES = [
@@ -151,13 +156,6 @@ const ROUGHDRAFT_MARKDOWN_SYNTAX = [
       "Highlights the reviewed text and attaches a margin comment to it.",
   },
   {
-    label: "Reply",
-    syntax:
-      '{>>I can make that edit.<<}{id="c2" by="AI" at="2026-04-28T12:01:00.000Z" re="c1"}',
-    description:
-      "Adds a threaded reply by pointing `re` at the parent comment id.",
-  },
-  {
     label: "Insertion",
     syntax: '{++new text++}{id="s1" by="AI" at="2026-04-28T12:02:00.000Z"}',
     description: "Suggests text to add without applying it silently.",
@@ -198,7 +196,7 @@ const ROUGHDRAFT_MARKDOWN_CONTRACT = [
   {
     title: "Metadata",
     description:
-      "Attribute blocks come immediately after review markup. `id` is document-local, `by` is a human or agent label, `at` is an ISO timestamp, and `re` points to the parent comment for replies.",
+      "Attribute blocks come immediately after review markup. `id` is document-local, `by` is a human or agent label, and `at` is an ISO timestamp.",
   },
   {
     title: "Anchors",
@@ -219,15 +217,15 @@ const ROUGHDRAFT_MARKDOWN_CONTRACT = [
 const ROUGHDRAFT_MARKDOWN_EXTENSION_DETAILS = [
   {
     title: "Attribute metadata",
-    body: 'Roughdraft stores ids, authors, timestamps, and reply links in an attribute block after review markup, such as {>>Looks right.<<}{id="c1" by="AI" at="2026-04-28T12:00:00.000Z" re="c0"}.',
+    body: 'Roughdraft stores ids, authors, and timestamps in an attribute block after review markup, such as {>>Looks right.<<}{id="c1" by="AI" at="2026-04-28T12:00:00.000Z"}.',
   },
   {
-    title: "Threaded comments",
-    body: "A comment can stand alone, attach to a highlighted span, or reply to another comment by setting `re` to the parent comment id.",
+    title: "Anchored comments",
+    body: "A comment can stand alone or attach to a highlighted span while staying readable in the Markdown source.",
   },
   {
     title: "Reviewable suggestions",
-    body: "Insertions, deletions, and substitutions can carry their own ids, then comments can reply to those ids to discuss a proposed edit before accepting it.",
+    body: "Insertions, deletions, and substitutions carry their own ids so the app can accept or reject each proposed edit.",
   },
   {
     title: "Literal examples stay literal",
@@ -241,12 +239,6 @@ const HOMEPAGE_WORKFLOW_REVIEW_ITEMS = [
     author: "Nora",
     body: 'This should go above "It\'s just Markdown."',
     kind: "comment",
-    replies: [
-      {
-        author: "AI",
-        body: "Sounds good. I'll move it above that section.",
-      },
-    ],
   },
   {
     key: "nora-suggestion",
@@ -254,7 +246,6 @@ const HOMEPAGE_WORKFLOW_REVIEW_ITEMS = [
     author: "Nora",
     body: 'Replace: "agent\'s plan" with "homepage plan"',
     kind: "suggestion",
-    replies: [],
   },
 ] as const;
 
@@ -742,7 +733,6 @@ function AgentChatMock({
 function RoughdraftPopupMock({ workflowStage }: { workflowStage: number }) {
   const visible = workflowStage >= 3;
   const showUserFeedback = workflowStage >= 4;
-  const showAgentReply = workflowStage >= 6;
   const showIncorporatedPlan = workflowStage >= 6;
   const showDoneButton = workflowStage >= 5 && workflowStage < 6;
   const documentShellRef = useRef<HTMLDivElement | null>(null);
@@ -781,6 +771,7 @@ function RoughdraftPopupMock({ workflowStage }: { workflowStage: number }) {
         getCommentAnchorMeasurements(
           anchorElements,
           railRect.top,
+          railRect.left,
           measurementScale,
         ),
       ),
@@ -1081,26 +1072,6 @@ function RoughdraftPopupMock({ workflowStage }: { workflowStage: number }) {
                         >
                           {item.body}
                         </p>
-                        {showAgentReply
-                          ? item.replies?.map((reply) => (
-                              <div
-                                className="mt-3 grid grid-cols-[1.65rem_minmax(0,1fr)] gap-2.5 border-t border-stone-200 pt-3"
-                                key={`${item.key}-${reply.author}`}
-                              >
-                                <div className="flex size-[1.65rem] items-center justify-center rounded-full border border-sky-200 bg-sky-50 text-[0.62rem] font-bold text-sky-700">
-                                  {reply.author}
-                                </div>
-                                <div>
-                                  <div className="mb-0.5 text-[0.76rem] font-bold text-slate-950 dark:text-slate-50">
-                                    {reply.author}
-                                  </div>
-                                  <p className="m-0 text-[0.8rem] leading-[1.65] text-stone-700 dark:text-stone-300">
-                                    {reply.body}
-                                  </p>
-                                </div>
-                              </div>
-                            ))
-                          : null}
                         {item.kind === "suggestion" ? (
                           <div className="mt-2 flex gap-3 text-[0.95rem] text-stone-400">
                             <Check className="size-3.5" aria-hidden="true" />
@@ -1205,9 +1176,9 @@ export function RoughdraftFlavoredMarkdownPage() {
               icon: FileText,
             },
             {
-              title: "Threaded review",
+              title: "Inline review",
               description:
-                "Comments carry document-local ids, authors, timestamps, and reply links for back-and-forth discussion.",
+                "Comments carry document-local ids, authors, and timestamps while staying anchored to the reviewed text.",
               icon: MessageSquare,
             },
             {
@@ -1370,16 +1341,56 @@ function createPreviewPage(): Page {
   };
 }
 
+function NativeEmptyState({
+  loadError,
+  opening,
+  onOpen,
+}: {
+  loadError: string | null;
+  opening: boolean;
+  onOpen: () => void;
+}) {
+  return (
+    <main className="dark relative flex h-screen min-w-0 flex-col overflow-hidden bg-[#121413] text-slate-50">
+      <div className="flex min-h-0 flex-1 items-center justify-center px-6">
+        <section className="w-full max-w-xl text-center" aria-live="polite">
+          <div className="mx-auto mb-6 grid size-16 place-items-center rounded-md border border-white/12 bg-white/[0.055] font-mono text-sm font-bold text-slate-200">
+            .md
+          </div>
+          <h1 className="text-4xl font-semibold tracking-normal text-slate-50">
+            Open a Markdown file
+          </h1>
+          <p className="mx-auto mt-4 max-w-md text-sm leading-7 text-slate-400">
+            Use File &gt; Open, press Command-O, or drop a Markdown file into
+            this window.
+          </p>
+          {loadError ? (
+            <p className="mx-auto mt-4 max-w-md rounded-md border border-red-400/20 bg-red-400/10 px-3 py-2 text-sm text-red-100">
+              {loadError}
+            </p>
+          ) : null}
+          <Button
+            className="mt-7 h-10 rounded-md px-4"
+            type="button"
+            onClick={onOpen}
+            disabled={opening}
+          >
+            <FileText className="size-4" aria-hidden="true" />
+            {opening ? "Opening" : "Open File"}
+          </Button>
+        </section>
+      </div>
+    </main>
+  );
+}
+
 export function PreviewPage() {
   const [backend] = useState(() => new PreviewBackend(createPreviewPage()));
   const [previewPage, setPreviewPage] = useState<Page>(() =>
     backend.getCurrentPage(),
   );
-  const [previewForceResetKey, setPreviewForceResetKey] = useState<
-    string | null
-  >(null);
-  const [editorViewMode, setEditorViewMode] = useState<DocumentEditorViewMode>(
-    () => getDocumentEditorViewModeFromLocation("rich-text"),
+  const [editorViewMode] = useState<DocumentEditorViewMode>(() =>
+    getDocumentEditorViewModeFromLocation("rich-text"),
   );
   const [, setSaveState] = useState<DocumentSaveState>("saved");
 
@@ -1400,16 +1411,6 @@ export function PreviewPage() {
     [backend],
   );
 
-  const handleResetPreview = useCallback(async () => {
-    const freshBackendPage = createPreviewPage();
-    const savedPage = await backend.saveMarkdownFile(
-      PREVIEW_DOCUMENT_PATH,
-      freshBackendPage.content,
-    );
-    setPreviewPage(savedPage);
-    setPreviewForceResetKey(`preview-reset:${Date.now()}`);
-  }, [backend]);
-
   const handleCompletePreviewReview = useCallback(async () => {
     return backend.completeReview
       ? backend.completeReview(PREVIEW_DOCUMENT_PATH)
@@ -1417,22 +1418,18 @@ export function PreviewPage() {
   }, [backend]);
 
   return (
-    <main className="relative flex h-screen min-w-0 flex-col overflow-hidden bg-[#FCFCFC] dark:bg-background text-slate-950 dark:text-slate-50">
+    <main className="dark relative flex h-screen min-w-0 flex-col overflow-hidden bg-[#121413] text-slate-50">
       <DocumentWorkspace
         documentPage={previewPage}
         activeDocumentPath={PREVIEW_DOCUMENT_PATH}
         documentFilenameLabel={PREVIEW_DOCUMENT_PATH}
         documentEditorViewMode={editorViewMode}
-        onDocumentEditorViewModeChange={setEditorViewMode}
         onSaveDocument={handleSaveDocument}
         onDocumentSaveStateChange={setSaveState}
         onDocumentDirtyStateChange={() => {}}
         onDocumentLocalContentChange={() => {}}
         documentDiskChangeState="clean"
-        documentForceResetKey={previewForceResetKey}
-        onReloadDocumentFromDisk={handleResetPreview}
-        onKeepEditingWithoutAutosave={() => {}}
-        onOverwriteDocumentOnDisk={() => {}}
+        documentForceResetKey={null}
         onCompleteReview={handleCompletePreviewReview}
         backend={backend}
       />
@@ -1461,7 +1458,8 @@ export function App() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
-  const [documentEditorViewMode, setDocumentEditorViewMode] = useState(() =>
+  const [nativeOpenDialogBusy, setNativeOpenDialogBusy] = useState(false);
+  const [documentEditorViewMode] = useState(() =>
     getDocumentEditorViewModeFromLocation("rich-text"),
   );
   const backendRef = useRef<StorageBackend | null>(null);
@@ -1477,9 +1475,18 @@ export function App() {
   documentSaveStateRef.current = documentSaveState;
 
   const applyDocumentPage = useCallback((nextDocument: Page) => {
+    documentPageRef.current = nextDocument;
     setDocumentPage(nextDocument);
     documentDraftContentRef.current = nextDocument.content;
   }, []);
+
+  const handleDocumentSaveStateChange = useCallback(
+    (state: DocumentSaveState) => {
+      documentSaveStateRef.current = state;
+      setDocumentSaveState(state);
+    },
+    [],
+  );
 
   const loadDocument = useCallback(
     async (nextBackend: StorageBackend, relativePath: string) => {
@@ -1491,6 +1498,27 @@ export function App() {
       return nextDocument;
     },
     [applyDocumentPage],
+  );
+
+  const loadTauriMarkdownFile = useCallback(
+    async (nextBackend: TauriBackend, file: TauriMarkdownFile) => {
+      const relativePath = nextBackend.configureProjectFromFile(file);
+      const nextDocument = nextBackend.pageFromMarkdownFile(file, relativePath);
+      applyDocumentPage(nextDocument);
+      setBackend(nextBackend);
+      setActiveDocumentPath(relativePath);
+      setLoadError(null);
+      documentDirtyRef.current = false;
+      documentDraftContentRef.current = nextDocument.content;
+      handleDocumentSaveStateChange("saved");
+      setDocumentDiskChangeState("clean");
+      setDocumentForceResetKey(
+        `${relativePath}:${nextDocument.version ?? Date.now()}`,
+      );
+      syncRequestedPathInUrl(file.path);
+      return nextDocument;
+    },
+    [applyDocumentPage, handleDocumentSaveStateChange],
   );
 
   useEffect(() => {
@@ -1511,6 +1539,8 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    if (isTauriRuntime()) return;
+
     const sourceUrl = new URL("/api/open-requests", window.location.origin);
     if (requestedPathState.rawPath) {
       sourceUrl.searchParams.set("path", requestedPathState.rawPath);
@@ -1543,6 +1573,39 @@ export function App() {
   }, [requestedPathState.rawPath]);
 
   useEffect(() => {
+    if (!isTauriBackend(backend)) return;
+
+    let dispose: (() => void) | undefined;
+    let cancelled = false;
+
+    void backend
+      .listenForOpenedFiles(
+        (file) => {
+          if (cancelled) return;
+          void loadTauriMarkdownFile(backend, file);
+        },
+        (message) => {
+          if (!cancelled) setLoadError(message);
+        },
+      )
+      .then((unlisten) => {
+        if (cancelled) {
+          unlisten();
+          return;
+        }
+        dispose = unlisten;
+      })
+      .catch((error) => {
+        console.error("Failed to listen for Markdown Mode file opens:", error);
+      });
+
+    return () => {
+      cancelled = true;
+      dispose?.();
+    };
+  }, [backend, loadTauriMarkdownFile]);
+
+  useEffect(() => {
     let cancelled = false;
 
     const initialize = async () => {
@@ -1555,6 +1618,21 @@ export function App() {
         if (cancelled) return;
 
         setBackend(detectedBackend);
+
+        if (isTauriBackend(detectedBackend) && !requestedPathState.rawPath) {
+          const pendingFile = await detectedBackend.takePendingOpenedFile();
+          if (cancelled) return;
+
+          if (pendingFile) {
+            await loadTauriMarkdownFile(detectedBackend, pendingFile);
+            if (cancelled) return;
+          } else {
+            setActiveDocumentPath(null);
+          }
+
+          setLoading(false);
+          return;
+        }
 
         if (detectedBackend.info.kind === "remote") {
           const documentPath = detectedBackend.info.detail || "remote.md";
@@ -1609,10 +1687,28 @@ export function App() {
     };
   }, [
     loadDocument,
+    loadTauriMarkdownFile,
     requestedPathState.documentPath,
     requestedPathState.projectPath,
     requestedPathState.rawPath,
   ]);
+
+  const handleNativeOpenMarkdownFile = useCallback(async () => {
+    if (!isTauriBackend(backend)) return;
+
+    setNativeOpenDialogBusy(true);
+    try {
+      const file = await backend.openMarkdownDialog();
+      if (file) {
+        await loadTauriMarkdownFile(backend, file);
+      }
+    } catch (error) {
+      console.error("Failed to open markdown file:", error);
+      setLoadError("Could not open that markdown file.");
+    } finally {
+      setNativeOpenDialogBusy(false);
+    }
+  }, [backend, loadTauriMarkdownFile]);
 
   useEffect(() => {
     const workspaceTitlePath = activeDocumentPath
@@ -1636,6 +1732,30 @@ export function App() {
     requestedPathState.rawPath,
   ]);
 
+  const handleDocumentDirtyStateChange = useCallback((isDirty: boolean) => {
+    documentDirtyRef.current = isDirty;
+  }, []);
+
+  const handleDocumentLocalContentChange = useCallback((markdown: string) => {
+    documentDraftContentRef.current = markdown;
+  }, []);
+
+  const reloadCurrentDocumentFromDisk = useCallback(async () => {
+    const currentBackend = backendRef.current;
+    const currentPath = activeDocumentPathRef.current;
+    if (!currentBackend || !currentPath) return;
+
+    const nextDocument = await currentBackend.getMarkdownFile(currentPath);
+    applyDocumentPage(nextDocument);
+    documentDirtyRef.current = false;
+    documentDraftContentRef.current = nextDocument.content;
+    handleDocumentSaveStateChange("saved");
+    setDocumentDiskChangeState("clean");
+    setDocumentForceResetKey(
+      `${currentPath}:${nextDocument.version ?? Date.now()}`,
+    );
+  }, [applyDocumentPage, handleDocumentSaveStateChange]);
+
   const handleSaveDocument = useCallback(
     async (id: string, content: string) => {
       if (!activeDocumentPath) return;
@@ -1653,7 +1773,8 @@ export function App() {
         );
       } catch (error) {
         if (error instanceof MarkdownFileConflictError) {
-          setDocumentDiskChangeState("conflict");
+          await reloadCurrentDocumentFromDisk();
+          return;
         }
         throw error;
       }
@@ -1670,26 +1791,11 @@ export function App() {
 
       applyDocumentPage(nextDocument);
       documentDirtyRef.current = false;
+      documentDraftContentRef.current = nextDocument.content;
       setDocumentDiskChangeState("clean");
     },
-    [activeDocumentPath, applyDocumentPage],
+    [activeDocumentPath, applyDocumentPage, reloadCurrentDocumentFromDisk],
   );
-
-  const handleDocumentDirtyStateChange = useCallback((isDirty: boolean) => {
-    documentDirtyRef.current = isDirty;
-  }, []);
-
-  const handleDocumentSaveStateChange = useCallback(
-    (state: DocumentSaveState) => {
-      documentSaveStateRef.current = state;
-      setDocumentSaveState(state);
-    },
-    [],
-  );
-
-  const handleDocumentLocalContentChange = useCallback((markdown: string) => {
-    documentDraftContentRef.current = markdown;
-  }, []);
 
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -1711,53 +1817,6 @@ export function App() {
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, [documentDiskChangeState]);
-
-  const handleReloadDocumentFromDisk = useCallback(async () => {
-    const currentBackend = backendRef.current;
-    const currentPath = activeDocumentPathRef.current;
-    if (!currentBackend || !currentPath) return;
-
-    const nextDocument = await currentBackend.getMarkdownFile(currentPath);
-    applyDocumentPage(nextDocument);
-    documentDirtyRef.current = false;
-    setDocumentDiskChangeState("clean");
-    setDocumentForceResetKey(
-      `${currentPath}:${nextDocument.version ?? Date.now()}`,
-    );
-  }, [applyDocumentPage]);
-
-  const handleKeepEditingWithoutAutosave = useCallback(() => {
-    setDocumentDiskChangeState("paused");
-  }, []);
-
-  const handleOverwriteDocumentOnDisk = useCallback(async () => {
-    const currentBackend = backendRef.current;
-    const currentPath = activeDocumentPathRef.current;
-    const currentDocument = documentPageRef.current;
-    if (!currentBackend || !currentPath || !currentDocument) return;
-
-    const content = documentDraftContentRef.current ?? currentDocument.content;
-    const firstLine = content.split("\n")[0] || "";
-    const fallbackTitle =
-      currentDocument.id.split("/").at(-1) || currentDocument.id;
-    const title = firstLine.replace(/^#*\s*/, "") || fallbackTitle;
-    const savedDocument = (await currentBackend.saveMarkdownFile(
-      currentPath,
-      content,
-    )) ?? {
-      ...currentDocument,
-      content,
-      title,
-    };
-
-    applyDocumentPage(savedDocument);
-    documentDirtyRef.current = false;
-    handleDocumentSaveStateChange("saved");
-    setDocumentDiskChangeState("clean");
-    setDocumentForceResetKey(
-      `${currentPath}:${savedDocument.version ?? Date.now()}:overwrite`,
-    );
-  }, [applyDocumentPage, handleDocumentSaveStateChange]);
 
   const handleCompleteReview = useCallback(async () => {
     const currentBackend = backendRef.current;
@@ -1812,26 +1871,10 @@ export function App() {
           return;
         }
 
-        if (documentDiskChangeState === "paused") {
-          return;
-        }
-
-        if (documentDirtyRef.current) {
-          setDocumentDiskChangeState("changed");
-          return;
-        }
-
         void (async () => {
-          const currentBackend = backendRef.current;
-          const currentPath = activeDocumentPathRef.current;
-          if (!currentBackend || !currentPath || disposed) return;
-
           try {
-            const nextDocument =
-              await currentBackend.getMarkdownFile(currentPath);
             if (disposed) return;
-            applyDocumentPage(nextDocument);
-            setDocumentDiskChangeState("clean");
+            await reloadCurrentDocumentFromDisk();
           } catch (error) {
             console.error("Failed to reload changed markdown file:", error);
           }
@@ -1843,30 +1886,10 @@ export function App() {
       disposed = true;
       stopWatching();
     };
-  }, [activeDocumentPath, applyDocumentPage, backend, documentDiskChangeState]);
-
-  const handleDocumentEditorViewModeChange = useCallback(
-    (nextMode: DocumentEditorViewMode) => {
-      setDocumentEditorViewMode((current) => {
-        if (nextMode === current) return current;
-        window.history.replaceState(
-          null,
-          "",
-          buildLocationForDocumentEditorViewMode(nextMode),
-        );
-        return nextMode;
-      });
-    },
-    [],
-  );
+  }, [activeDocumentPath, backend, reloadCurrentDocumentFromDisk]);
 
   if (loading) {
-    return (
-      <div
-        className="h-screen bg-[#FCFCFC] dark:bg-background"
-        aria-hidden="true"
-      />
-    );
+    return <div className="h-screen bg-[#121413]" aria-hidden="true" />;
   }
 
   if (isRoughdraftFlavoredMarkdownRoute) {
@@ -1877,7 +1900,17 @@ export function App() {
     return <PreviewPage />;
   }
 
-  if (!requestedPathState.rawPath || loadError) {
+  if ((!requestedPathState.rawPath && !activeDocumentPath) || loadError) {
+    if (isTauriBackend(backend)) {
+      return (
+        <NativeEmptyState
+          loadError={loadError}
+          opening={nativeOpenDialogBusy}
+          onOpen={handleNativeOpenMarkdownFile}
+        />
+      );
+    }
+
     return (
       <Homepage
         message={loadError ?? <HomepageSubtitle />}
@@ -1894,7 +1927,7 @@ export function App() {
     getPathLeaf(documentAbsolutePath ?? activeDocumentPath) ?? "Untitled.md";
 
   return (
-    <main className="relative flex h-screen min-w-0 flex-col overflow-hidden bg-[#FCFCFC] dark:bg-background text-slate-950 dark:text-slate-50">
+    <main className="relative flex h-screen min-w-0 flex-col overflow-hidden bg-[#121413] text-slate-50">
       {updateStatus ? (
         <div className="pointer-events-none absolute top-4 right-4 z-40 max-w-sm">
           <div className="pointer-events-auto">
@@ -1907,16 +1940,12 @@ export function App() {
         activeDocumentPath={activeDocumentPath}
         documentFilenameLabel={documentFilenameLabel}
         documentEditorViewMode={documentEditorViewMode}
-        onDocumentEditorViewModeChange={handleDocumentEditorViewModeChange}
         onSaveDocument={handleSaveDocument}
         onDocumentSaveStateChange={handleDocumentSaveStateChange}
         onDocumentDirtyStateChange={handleDocumentDirtyStateChange}
         onDocumentLocalContentChange={handleDocumentLocalContentChange}
         documentDiskChangeState={documentDiskChangeState}
         documentForceResetKey={documentForceResetKey}
-        onReloadDocumentFromDisk={handleReloadDocumentFromDisk}
-        onKeepEditingWithoutAutosave={handleKeepEditingWithoutAutosave}
-        onOverwriteDocumentOnDisk={handleOverwriteDocumentOnDisk}
         onCompleteReview={handleCompleteReview}
         backend={backend}
       />

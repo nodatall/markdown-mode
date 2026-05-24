@@ -1,7 +1,7 @@
 # Roughdraft UI State Screenshot Guide
 This file is a reusable checklist for capturing Roughdraft's major UI states. It is meant to support periodic visual review, not to replace automated tests.
 ## Screenshot Folder Convention
-Put each run in a timestamped directory:
+Put each run in a timestamped {==directory==}{>>123<<}{id="c3" by="user" at="2026-05-24T03:59:40.547Z"}:
 
 ```bash
 mkdir -p .context/ui-state-screenshots/$(date +%Y%m%d-%H%M%S)
@@ -60,7 +60,7 @@ Paragraph with **bold**, [link](https://example.com), `inline code`.
 ```
 ### Review Document
 ```markdown
-# Review document {==Select this sentence==}{>>Root comment<<}{id="root" by="Nora" at="2026-04-28T12:00:00.000Z"}{>>Nested reply<<}{id="child" by="AI" at="2026-04-28T12:01:00.000Z" re="root"} This sentence includes {++clearer wording++}{id="s1" by="AI" at="2026-04-28T12:02:00.000Z"}{>>Looks good.<<}{id="c1" by="Nora" at="2026-04-28T12:03:00.000Z" re="s1"}. Replace {~~old phrase~>new phrase~~}{id="s2" by="AI" at="2026-04-28T12:04:00.000Z"} and remove {--dead text--}{id="s3" by="AI" at="2026-04-28T12:05:00.000Z"}.
+# Review document {==Select this sentence==}{>>Root comment<<}{id="root" by="Nora" at="2026-04-28T12:00:00.000Z"} This sentence includes {++clearer wording++}{id="s1" by="AI" at="2026-04-28T12:02:00.000Z"}. Replace {~~old phrase~>new phrase~~}{id="s2" by="AI" at="2026-04-28T12:04:00.000Z"} and remove {--dead text--}{id="s3" by="AI" at="2026-04-28T12:05:00.000Z"}.
 ```
 ### Fenced CriticMarkup Document
 ```markdown
@@ -86,17 +86,14 @@ Paragraph with **bold**, [link](https://example.com), `inline code`.
 | RFM guide | Writing edit example | Click `rfm-format-example-writing-edit` | `rfm-format-example-writing-edit` | Useful for prose-focused review states. |
 | Preview | Rich text default | `/preview?editor=rich-text` | `page-card-rich-text`, `rich-text-editor` | Uses in-memory preview backend and includes a sample anchored comment. |
 | Preview | Code editor default | `/preview?editor=code` | `page-card-code`, `markdown-code-editor` | Capture line wrapping, code editor chrome, and rail behavior. |
-| Document | Rich/code toggle | Use `document-editor-view-toggle` | `document-editor-view-toggle` | URL changes to `?editor=code` or `?editor=rich-text`. |
-| Document | Editing mode | Open mode menu and choose Editing | `document-mode-trigger` | Normal edit behavior. |
-| Document | Suggesting mode | Open mode menu and choose Suggesting | `document-mode-trigger` | Selection actions should create suggestions instead of direct edits. |
-| Document | Viewing mode | Open mode menu and choose Viewing | `document-mode-trigger` | Editing controls should look non-editable. |
+| Document | Rich text route | Open a local document without `?editor=code` | `page-card-rich-text`, `rich-text-editor` | Document chrome should stay quiet: no rich/code toggle and no mode menu. |
+| Document | Code route | Open a local document with `?editor=code` | `page-card-code`, `markdown-code-editor` | Code mode is route-selected rather than exposed through document chrome. |
 | Document | Save status: saved | Any clean document after autosave | `document-save-status` | Label should be `Saved`. |
 | Document | Save status: unsaved | Type in a local document before save completes | `document-save-status` | Transient; often easier with save throttling or network mocking. |
 | Document | Save status: saving | Type and capture during autosave | `document-save-status` | Transient; easiest with mocked delayed save. |
 | Document | Save status: failed | Force save error | `document-save-status` | Use backend/API mocking or a component harness. |
-| Document | Disk changed | Open local file, modify file externally while browser content is clean | `file-conflict-notice`, `file-conflict-action-reload`, `file-conflict-action-overwrite` | Banner title: `File changed on disk`. |
-| Document | Save conflict | Edit in browser, then modify file externally before autosave resolves | `file-conflict-notice`, `file-conflict-action-keep-editing` | Banner title: `Save conflict`; autosave pauses. |
-| Document | Autosave paused | Keep editing after conflict | `file-conflict-notice`, `file-conflict-action-overwrite` | Banner title: `Autosave paused`; no keep-editing action. |
+| Document | Disk changed | Open local file, modify file externally | `document-save-status`, `rich-text-editor`, `markdown-code-editor` | Disk content is authoritative; the document reloads without a conflict banner. |
+| Document | Stale save reload | Edit in browser after an external write | `document-save-status`, `document-content-card` | The disk version replaces transient local draft state; no keep-editing or overwrite actions. |
 | Document | Review handoff idle | Open a local file while a watcher is connected | `review-handoff-button` | Header text: `Agent watching`. |
 | Document | Review handoff sending | Click handoff button while watcher is connected | `review-handoff-button` | Button label: `Sending`. |
 | Document | Review handoff sent | Successful handoff | `review-handoff-status` | Popover title: `Your agent is now working`. |
@@ -105,38 +102,30 @@ Paragraph with **bold**, [link](https://example.com), `inline code`.
 | Remote | Connected banner | Open with `?session=<id>&token=<token>` and remote capability enabled | `role=status`, `aria-label="Remote session connected"` | Requires remote backend support in `/api/status`. |
 | Remote | Disconnected banner | Drop remote session connection | `role=alert`, `aria-label="Remote session disconnected"` | Best captured with backend mocking. |
 | Editor | Selection menu | Select text in rich editor | `selection-menu` | Capture formatting buttons and comment/suggestion actions. |
-| Editor | Selection menu on suggestion | Select existing suggestion text | `selection-menu-action-accept-suggestion`, `selection-menu-action-reject-suggestion` | Requires review fixture. |
-| Editor | Link popover | Click a link or choose Link from selection menu | `link-popover`, `link-url-input`, `link-action-open`, `link-action-delete` | Use the plain fixture link. |
+| Editor | Direct comment composer | Select or double-click text in the rich editor | `comment-rail-c1-editor`, `document-comment-popover` | Selection opens a focused comment composer directly; the old selection toolbar is absent. |
+| Editor | Link popover | Click a link | `link-popover`, `link-url-input`, `link-action-open`, `link-action-delete` | Use the plain fixture link. |
 | Editor | Context menu | Right-click in rich editor | `editor-context-menu` | Capture comment, suggestion, paste, and paste-markdown actions. |
-| Review rail | Comments | Open review fixture in rich mode | `document-review-rail`, `comment-thread-root` | Thread containers use `data-comment-thread-container="true"`. |
+| Comment markers | Comments | Open review fixture in rich mode and click a numbered marker | `document-comment-marker-root`, `document-comment-popover`, `comment-thread-root` | Comments render as small numbered markers near anchored text, with the editor shown locally. |
+| Comment markers | Working comment | Submit a comment while a watcher is connected | `document-comment-marker-c1-working`, `comment-rail-c1-working` | Marker shows a pulse while the submitted comment is being handed to the agent; the comment card may also show `Working` when open. |
 | Review rail | Suggestions | Open review fixture in rich mode | `suggestion-thread-s1`, `suggestion-thread-s2`, `suggestion-thread-s3` | Thread containers use `data-suggestion-thread-container="true"`. |
 | Review rail | Draft suggestion | Select text and choose a suggestion action | `draft-suggestion-thread`, `draft-suggestion-editor` | Capture dismiss/cancel/apply actions. |
-| Comment editor | Root comment editing | Use a comment card edit action | `comment-rail-root-editor` | Comment test IDs follow `comment-${variant}-${id}-...`. |
-| Comment editor | Reply editing | Use a reply action | `comment-rail-child-editor` | Useful for nested thread spacing. |
+| Comment editor | Comment editing | Open a comment card | `comment-rail-root-editor` | Comment test IDs follow `comment-${variant}-${id}-...`. |
 | Code mode | Review rail present | Open review fixture with `?editor=code` | `page-card-code`, `markdown-code-editor` | Confirms code editor and rail can coexist. |
 | Code mode | Review rail absent | Open fenced fixture with `?editor=code` | `page-card-code`, `markdown-code-editor` | Confirms fenced CriticMarkup alone does not create review rail. |
 | Error/home fallback | Non-Markdown path | Open URL with `?path=/tmp/file.txt` | homepage error message | Copy: `Roughdraft now opens one .md file at a time.` |
 | Error/home fallback | Missing/unloadable path | Open URL with invalid markdown path through local backend | homepage error message | Captures load-error homepage variant. |
-## Playwright Capture Skeleton
-```ts
-import { chromium, devices } from "playwright";
+## Playwright Capture Skeleton ```ts import { chromium, devices } from "playwright";
+const baseUrl = process.env.ROUGHDRAFT_BASE_URL ?? "[http://127.0.0.1:5173](http://127.0.0.1:5173)"; const outDir = process.env.ROUGHDRAFT_SCREENSHOT_DIR ?? ".context/ui-state-screenshots/manual";
 
-const baseUrl = process.env.ROUGHDRAFT_BASE_URL ?? "http://127.0.0.1:5173";
-const outDir = process.env.ROUGHDRAFT_SCREENSHOT_DIR ?? ".context/ui-state-screenshots/manual";
+const browser = await chromium.launch(); const desktop = await browser.newPage({ viewport: { width: 1440, height: 1000 } }); await desktop.goto(`${baseUrl}/`); await desktop.screenshot({ path: `${outDir}/01-home-desktop.png`, fullPage: true });
 
-const browser = await chromium.launch();
-const desktop = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
-await desktop.goto(`${baseUrl}/`);
-await desktop.screenshot({ path: `${outDir}/01-home-desktop.png`, fullPage: true });
-
-const mobile = await browser.newPage({ ...devices["iPhone 13"] });
-await mobile.goto(`${baseUrl}/`);
-await mobile.screenshot({ path: `${outDir}/01-home-mobile.png`, fullPage: true });
+const mobile = await browser.newPage({ ...devices["iPhone 13"] }); await mobile.goto(`${baseUrl}/`); await mobile.screenshot({ path: `${outDir}/01-home-mobile.png`, fullPage: true });
 
 await browser.close();
+
 ```
 
-For interaction-heavy states, prefer selectors over coordinates. The current code has stable `data-testid` hooks for the homepage storyboard, editor view toggle, mode trigger, conflict banner/actions, review rail, rich editor, code editor, selection menu, link popover, and context menu.
+For interaction-heavy states, prefer selectors over coordinates. The current code has stable `data-testid` hooks for the homepage storyboard, review handoff button, save status, comment markers/popover, suggestion rail, rich editor, code editor, link popover, and context menu.
 ## States That Need A Harness Or Mocking
 These are real product states, but they are awkward to capture deterministically through only public routes:
 
@@ -144,7 +133,7 @@ These are real product states, but they are awkward to capture deterministically
   
 - Save status: saving, failed, and sometimes unsaved
   
-- Disk conflict and autosave paused
+- Disk-authoritative reload after an external write
   
 - Review handoff undelivered/error
   
@@ -166,3 +155,4 @@ The most reliable long-term solution is a dedicated screenshot harness route or 
 - Capture both rich-text and code editor for document states that affect the editor surface or review rail.
   
 - Keep screenshots in `.context/` unless the run is intentionally being committed as visual documentation.
+```

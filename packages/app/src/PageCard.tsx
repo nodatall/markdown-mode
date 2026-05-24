@@ -3,8 +3,18 @@ import type { Mark as ProseMirrorMark } from "@tiptap/pm/model";
 import { TextSelection } from "@tiptap/pm/state";
 import type { Editor } from "@tiptap/react";
 import { EditorContent, useEditor, useEditorState } from "@tiptap/react";
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-
+import { Plus } from "lucide-react";
+import {
+  type Dispatch,
+  memo,
+  type SetStateAction,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { buildLocationForLinkedMarkdownDocument } from "./app-navigation";
 import { CommentEditorList } from "./CommentEditorList";
 import {
   type CriticChangeAttrs,
@@ -14,13 +24,17 @@ import {
   criticMarkdownHasReviewRail,
   criticMarkdownToEditorState,
   editorStateToCriticMarkdown,
-  getCommentDescendantIds,
 } from "./critic-markup";
 import {
   type CriticChangeRailItem,
   DocumentReviewRail,
 } from "./DocumentReviewRail";
-import { getPreferredCommentId, parseCommentIds } from "./document-comments";
+import {
+  type CommentGroupAnchor,
+  expandCommentIdsForLegacyReferences,
+  getPreferredCommentId,
+  parseCommentIds,
+} from "./document-comments";
 import { EditorContextMenu } from "./EditorContextMenu";
 import {
   commentHighlightPluginKey,
@@ -30,7 +44,6 @@ import {
 } from "./editor-extensions";
 import { cn } from "./lib/utils";
 import { MarkdownCodeEditor } from "./MarkdownCodeEditor";
-import { buildLocationForLinkedMarkdownDocument } from "./app-navigation";
 import { toHtml } from "./markdown";
 import type { Page, StorageBackend } from "./storage";
 import { useCommentAnchorLayout } from "./useCommentAnchorLayout";
@@ -65,6 +78,7 @@ interface PageCardProps {
   onDirtyStateChange?: (isDirty: boolean) => void;
   onLocalContentChange?: (markdown: string) => void;
   onSaveControllerChange?: (controller: DocumentSaveController | null) => void;
+  onCommentSubmit?: (commentId: string) => void | Promise<void>;
   saveBlocked?: boolean;
   forceResetKey?: string | null;
 }
@@ -85,6 +99,7 @@ interface PageCardEditorSurfaceProps {
   onDirtyStateChange?: (isDirty: boolean) => void;
   onLocalContentChange?: (markdown: string) => void;
   onSaveControllerChange?: (controller: DocumentSaveController | null) => void;
+  onCommentSubmit?: (commentId: string) => void | Promise<void>;
   saveBlocked?: boolean;
   forceResetKey?: string | null;
 }
@@ -101,6 +116,12 @@ interface RichTextEditorSurfaceProps {
   backend: StorageBackend;
   onEditorReady?: (editor: Editor | null) => void;
   onCommentRailPresenceChange?: (hasCommentRailSpace: boolean) => void;
+  onCommentSubmit?: (commentId: string) => void | Promise<void>;
+  commentDrafts?: Record<string, string>;
+  onCommentDraftsChange?: Dispatch<SetStateAction<Record<string, string>>>;
+  editingCommentIds?: string[];
+  onEditingCommentIdsChange?: Dispatch<SetStateAction<string[]>>;
+  workingCommentIds?: ReadonlySet<string>;
 }
 
 interface CodeEditorSurfaceProps {
@@ -119,6 +140,111 @@ export interface DraftSuggestionState {
   text: string;
 }
 
+function DocumentCommentMarkers({
+  commentGroups,
+  comments,
+  workingCommentIds,
+  selectedCommentId,
+  hoveredCommentId,
+  onFocusComment,
+  onHoverComment,
+}: {
+  commentGroups: CommentGroupAnchor[];
+  comments: Map<string, CriticComment>;
+  workingCommentIds?: ReadonlySet<string>;
+  selectedCommentId: string | null;
+  hoveredCommentId: string | null;
+  onFocusComment: (commentId: string) => void;
+  onHoverComment: (commentId: string | null) => void;
+}) {
+  const visibleGroups = commentGroups.filter((group) =>
+    group.commentIds.some((commentId) => comments.has(commentId)),
+  );
+
+  if (visibleGroups.length === 0) return null;
+
+  return (
+    <div
+      data-testid="document-comment-markers"
+      role="group"
+      className="pointer-events-none absolute inset-0 z-20"
+      aria-label="Document comments"
+    >
+      {visibleGroups.map((group) => {
+        const primaryCommentId =
+          (selectedCommentId && group.commentIds.includes(selectedCommentId)
+            ? selectedCommentId
+            : group.commentIds.find((commentId) => comments.has(commentId))) ??
+          null;
+        if (!primaryCommentId) return null;
+
+        const primaryComment = comments.get(primaryCommentId);
+        const isDraftComment = primaryComment?.content.trim().length === 0;
+        const savedGroupIndex = visibleGroups
+          .filter((candidate) =>
+            candidate.commentIds.some(
+              (commentId) =>
+                comments.get(commentId)?.content.trim().length !== 0,
+            ),
+          )
+          .findIndex((candidate) => candidate.key === group.key);
+        const isActive = group.commentIds.some(
+          (commentId) =>
+            commentId === selectedCommentId || commentId === hoveredCommentId,
+        );
+        const isWorking = group.commentIds.some((commentId) =>
+          workingCommentIds?.has(commentId),
+        );
+
+        return (
+          <button
+            key={group.key}
+            type="button"
+            data-testid={`document-comment-marker-${primaryCommentId}`}
+            className={cn(
+              "pointer-events-auto absolute flex size-6 -translate-y-1/2 items-center justify-center rounded-full border text-[11px] font-semibold leading-none shadow-[0_4px_14px_rgba(41,37,36,0.14)] transition",
+              isDraftComment
+                ? "border-sky-500 bg-sky-500 text-white hover:border-sky-600 hover:bg-sky-600"
+                : isActive
+                  ? "border-stone-900 bg-stone-900 text-white dark:border-slate-100 dark:bg-slate-100 dark:text-slate-950"
+                  : "border-[#D7D2C9] bg-[#FFFDFC] text-stone-600 hover:border-stone-500 hover:text-stone-950 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-slate-400 dark:hover:text-white",
+            )}
+            style={{
+              left: Math.max(0, group.anchorRight ?? 0) + 8,
+              top: Math.max(12, (group.anchorTop + group.anchorBottom) / 2),
+            }}
+            aria-label={
+              isDraftComment
+                ? "New comment"
+                : `Open comment ${savedGroupIndex + 1}`
+            }
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onFocusComment(primaryCommentId);
+            }}
+            onMouseEnter={() => onHoverComment(primaryCommentId)}
+            onMouseLeave={() => onHoverComment(null)}
+          >
+            {isDraftComment ? (
+              <Plus className="size-3.5" strokeWidth={2.5} />
+            ) : (
+              savedGroupIndex + 1
+            )}
+            {isWorking ? (
+              <span
+                className="-right-0.5 -top-0.5 absolute size-2.5 animate-pulse rounded-full border border-white bg-sky-500 dark:border-slate-950 dark:bg-sky-300"
+                data-testid={`document-comment-marker-${primaryCommentId}-working`}
+                aria-hidden="true"
+              />
+            ) : null}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function areCommentIdListsEqual(
   current: string[] | null | undefined,
   next: string[] | null | undefined,
@@ -126,6 +252,13 @@ function areCommentIdListsEqual(
   if (!current || !next) return current === next;
   if (current.length !== next.length) return false;
   return current.every((commentId, index) => commentId === next[index]);
+}
+
+function getCommentThreadPanelIds(
+  commentId: string,
+  comments: ReadonlyMap<string, CriticComment>,
+) {
+  return comments.has(commentId) ? [commentId] : [];
 }
 
 function getSelectionCommentIds(editor: Editor | null): string[] {
@@ -269,62 +402,6 @@ function findCommentAnchorElement(editor: Editor | null, commentId: string) {
       parseCommentIds(anchor.dataset.commentIds).includes(commentId),
     ) ?? null
   );
-}
-
-function getAnchorCommentIds(
-  editor: Editor | null,
-  commentId: string,
-): string[] {
-  const anchorElement = findCommentAnchorElement(editor, commentId);
-  if (!anchorElement) return [];
-  return parseCommentIds(anchorElement.dataset.commentIds);
-}
-
-function addCommentIdsToAnchor(
-  editor: Editor | null,
-  anchorCommentId: string,
-  commentIdsToAdd: string[],
-): string[] | null {
-  if (!editor) return null;
-
-  const commentMarkType = editor.state.schema.marks.commentRef;
-  const anchorCommentIds = getAnchorCommentIds(editor, anchorCommentId);
-  const nextCommentIds = [
-    ...new Set([...anchorCommentIds, ...commentIdsToAdd]),
-  ];
-  if (!commentMarkType || anchorCommentIds.length === 0) return null;
-
-  let found = false;
-  const tr = editor.state.tr;
-
-  editor.state.doc.descendants((node, pos) => {
-    if (!node.isText) return;
-
-    const mark = node.marks.find(
-      (candidate) =>
-        candidate.type === commentMarkType &&
-        Array.isArray(candidate.attrs.commentIds) &&
-        candidate.attrs.commentIds.includes(anchorCommentId),
-    );
-
-    if (!mark) return;
-
-    found = true;
-
-    const from = pos;
-    const to = pos + node.nodeSize;
-    tr.removeMark(from, to, commentMarkType);
-    tr.addMark(
-      from,
-      to,
-      commentMarkType.create({ commentIds: nextCommentIds }),
-    );
-  });
-
-  if (!found) return null;
-
-  editor.view.dispatch(tr);
-  return nextCommentIds;
 }
 
 function getDocumentCriticChanges(
@@ -488,15 +565,12 @@ function getDocumentCriticChangeRailItems(
   });
 
   for (const change of changes.values()) {
-    const rootCommentIds = [...comments.values()]
+    const directCommentIds = [...comments.values()]
       .filter((comment) => comment.parentCommentId === change.changeId)
       .map((comment) => comment.id);
-    const descendantIds = rootCommentIds.flatMap((commentId) =>
-      getCommentDescendantIds(commentId, comments),
-    );
 
     change.commentIds = [
-      ...new Set([...change.commentIds, ...rootCommentIds, ...descendantIds]),
+      ...new Set([...change.commentIds, ...directCommentIds]),
     ];
   }
 
@@ -529,57 +603,6 @@ function getCriticChangeRange(editor: Editor | null, changeId: string) {
   return { from, to };
 }
 
-function addCommentIdsToCriticChange(
-  editor: Editor | null,
-  changeId: string,
-  commentIdsToAdd: string[],
-) {
-  if (!editor) return false;
-
-  const commentMarkType = editor.state.schema.marks.commentRef;
-  if (!commentMarkType) return false;
-
-  let found = false;
-  const tr = editor.state.tr;
-
-  editor.state.doc.descendants((node, pos) => {
-    if (!node.isText) return;
-
-    const hasChange = node.marks.some(
-      (mark) =>
-        mark.type.name === "criticChange" && mark.attrs.changeId === changeId,
-    );
-    if (!hasChange) return;
-
-    found = true;
-    const existingMark = node.marks.find(
-      (mark) => mark.type === commentMarkType,
-    );
-    const existingCommentIds = Array.isArray(existingMark?.attrs.commentIds)
-      ? existingMark.attrs.commentIds
-      : [];
-    const nextCommentIds = [
-      ...new Set([...existingCommentIds, ...commentIdsToAdd]),
-    ];
-    const from = pos;
-    const to = pos + node.nodeSize;
-
-    if (existingMark) {
-      tr.removeMark(from, to, commentMarkType);
-    }
-    tr.addMark(
-      from,
-      to,
-      commentMarkType.create({ commentIds: nextCommentIds }),
-    );
-  });
-
-  if (!found) return false;
-
-  editor.view.dispatch(tr);
-  return true;
-}
-
 export function shouldDismissCommentThread(target: EventTarget | null) {
   if (!(target instanceof Element)) return true;
 
@@ -600,6 +623,12 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
   backend,
   onEditorReady,
   onCommentRailPresenceChange,
+  onCommentSubmit,
+  commentDrafts,
+  onCommentDraftsChange,
+  editingCommentIds,
+  onEditingCommentIdsChange,
+  workingCommentIds,
 }: RichTextEditorSurfaceProps) {
   const editorRef = useRef<Editor | null>(null);
   const criticChangeFrameRef = useRef<number | null>(null);
@@ -650,10 +679,7 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
     () => parsedContent.comments,
   );
   const frontmatterRef = useRef<string | null>(parsedContent.frontmatter);
-
-  useEffect(() => {
-    commentsRef.current = comments;
-  }, [comments]);
+  commentsRef.current = comments;
 
   useEffect(() => {
     interactionModeRef.current = interactionMode;
@@ -1250,6 +1276,58 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
   const { commentGroups, contentHeight, measureLayout } =
     useCommentAnchorLayout(editor, comments.size > 0);
 
+  const discardEmptyComment = useCallback(
+    (commentId: string) => {
+      const currentEditor = editorRef.current;
+      const comment = commentsRef.current.get(commentId);
+      if (!currentEditor || !comment || comment.content.trim().length > 0) {
+        return false;
+      }
+
+      const nextComments = new Map(commentsRef.current);
+      nextComments.delete(commentId);
+      commentsRef.current = nextComments;
+      setComments(nextComments);
+      onCommentDraftsChange?.((current) => {
+        const nextDrafts = { ...current };
+        delete nextDrafts[commentId];
+        return nextDrafts;
+      });
+      onEditingCommentIdsChange?.((current) =>
+        current.filter((currentCommentId) => currentCommentId !== commentId),
+      );
+
+      const collapsePosition = currentEditor.state.selection.to;
+      currentEditor
+        .chain()
+        .focus()
+        .removeCommentId(commentId)
+        .setTextSelection(collapsePosition)
+        .run();
+      currentEditor.commands.blur();
+      setSelectedCommentId((current) =>
+        current === commentId ? null : current,
+      );
+      setHoveredCommentId((current) =>
+        current === commentId ? null : current,
+      );
+      setPendingFocusCommentId((current) =>
+        current === commentId ? null : current,
+      );
+      emitMarkdownChange(currentEditor.getJSON(), nextComments);
+      requestAnimationFrame(() => {
+        measureLayout();
+      });
+      return true;
+    },
+    [
+      emitMarkdownChange,
+      measureLayout,
+      onCommentDraftsChange,
+      onEditingCommentIdsChange,
+    ],
+  );
+
   useEffect(() => {
     onEditorReady?.(editor);
 
@@ -1440,9 +1518,26 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
 
   useEffect(() => {
     const handleDocumentPointerDown = (event: PointerEvent) => {
-      if (!selectedCommentIdRef.current && !selectedChangeIdRef.current) return;
+      const selectedCommentId = selectedCommentIdRef.current;
+      const emptyDraftCommentId =
+        selectedCommentId &&
+        commentsRef.current.get(selectedCommentId)?.content.trim() === ""
+          ? selectedCommentId
+          : ([...commentsRef.current.values()].find(
+              (comment) => comment.content.trim() === "",
+            )?.id ?? null);
+      if (
+        !selectedCommentId &&
+        !selectedChangeIdRef.current &&
+        !emptyDraftCommentId
+      ) {
+        return;
+      }
       if (!shouldDismissCommentThread(event.target)) return;
 
+      if (emptyDraftCommentId) {
+        discardEmptyComment(emptyDraftCommentId);
+      }
       setSelectedCommentId(null);
       setHoveredCommentId(null);
       setSelectedChangeId(null);
@@ -1459,7 +1554,37 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
         true,
       );
     };
-  }, []);
+  }, [discardEmptyComment]);
+
+  useEffect(() => {
+    const handleDocumentKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+
+      const selectedCommentId = selectedCommentIdRef.current;
+      const emptyDraftCommentId =
+        selectedCommentId &&
+        commentsRef.current.get(selectedCommentId)?.content.trim() === ""
+          ? selectedCommentId
+          : ([...commentsRef.current.values()].find(
+              (comment) => comment.content.trim() === "",
+            )?.id ?? null);
+
+      if (!emptyDraftCommentId) return;
+
+      if (discardEmptyComment(emptyDraftCommentId)) {
+        event.preventDefault();
+        setSelectedCommentId(null);
+        setHoveredCommentId(null);
+        setPendingFocusCommentId(null);
+      }
+    };
+
+    document.addEventListener("keydown", handleDocumentKeyDown, true);
+
+    return () => {
+      document.removeEventListener("keydown", handleDocumentKeyDown, true);
+    };
+  }, [discardEmptyComment]);
 
   const handleAddComment = useCallback(() => {
     const currentEditor = editorRef.current;
@@ -1623,55 +1748,11 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
     [emitMarkdownChange],
   );
 
-  const replyToComment = useCallback(
-    (commentId: string) => {
-      const currentEditor = editorRef.current;
-      if (!currentEditor) return;
-
-      const comment = createCriticComment(
-        {
-          parentCommentId: commentId,
-        },
-        {
-          existingComments: commentsRef.current.values(),
-        },
-      );
-      suppressNextMarkdownUpdateRef.current = true;
-      const nextAnchorCommentIds = addCommentIdsToAnchor(
-        currentEditor,
-        commentId,
-        [comment.id],
-      );
-      if (suppressNextMarkdownUpdateRef.current) {
-        suppressNextMarkdownUpdateRef.current = false;
-      }
-      if (!nextAnchorCommentIds) return;
-
-      const nextComments = new Map(commentsRef.current);
-      nextComments.set(comment.id, comment);
-      commentsRef.current = nextComments;
-      setComments(nextComments);
-      setSelectedCommentId(comment.id);
-      setHoveredCommentId(null);
-      setPendingFocusCommentId(comment.id);
-      requestAnimationFrame(() => {
-        measureLayout();
-      });
-    },
-    [measureLayout],
-  );
-
   const removeSuggestionComments = useCallback(
     (changeId: string, currentEditor: Editor) => {
-      const directCommentIds = [...commentsRef.current.values()]
+      const commentIdsToDelete = [...commentsRef.current.values()]
         .filter((comment) => comment.parentCommentId === changeId)
         .map((comment) => comment.id);
-      const commentIdsToDelete = [
-        ...directCommentIds,
-        ...directCommentIds.flatMap((commentId) =>
-          getCommentDescendantIds(commentId, commentsRef.current),
-        ),
-      ];
 
       if (commentIdsToDelete.length === 0) return commentsRef.current;
 
@@ -1723,58 +1804,12 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
     [emitMarkdownChange, refreshCriticChanges, removeSuggestionComments],
   );
 
-  const replyToSuggestion = useCallback(
-    (changeId: string) => {
-      const currentEditor = editorRef.current;
-      if (!currentEditor) return;
-
-      const comment = createCriticComment(
-        {
-          parentCommentId: changeId,
-        },
-        {
-          existingComments: commentsRef.current.values(),
-        },
-      );
-      suppressNextMarkdownUpdateRef.current = true;
-      const didAddCommentId = addCommentIdsToCriticChange(
-        currentEditor,
-        changeId,
-        [comment.id],
-      );
-      if (suppressNextMarkdownUpdateRef.current) {
-        suppressNextMarkdownUpdateRef.current = false;
-      }
-      if (!didAddCommentId) {
-        return;
-      }
-
-      const nextComments = new Map(commentsRef.current);
-      nextComments.set(comment.id, comment);
-      commentsRef.current = nextComments;
-      setComments(nextComments);
-      setSelectedChangeId(changeId);
-      setSelectedCommentId(comment.id);
-      setHoveredCommentId(null);
-      setPendingFocusCommentId(comment.id);
-      refreshCriticChanges();
-      requestAnimationFrame(() => {
-        measureLayout();
-      });
-    },
-    [measureLayout, refreshCriticChanges],
-  );
-
   const deleteComment = useCallback(
     (commentId: string) => {
       const currentEditor = editorRef.current;
       if (!currentEditor) return;
 
-      const descendantIds = getCommentDescendantIds(
-        commentId,
-        commentsRef.current,
-      );
-      const commentIdsToDelete = [commentId, ...descendantIds];
+      const commentIdsToDelete = [commentId];
       const deletedIds = new Set(commentIdsToDelete);
       const nextComments = new Map(commentsRef.current);
       for (const id of commentIdsToDelete) {
@@ -1819,6 +1854,7 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
     if (!currentEditor) return;
 
     setSelectedCommentId(commentId);
+    setPendingFocusCommentId(commentId);
 
     const range = findCommentRange(currentEditor, commentId);
     if (range) {
@@ -1854,21 +1890,52 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
     );
   }, []);
 
-  const hasReviewRail = comments.size > 0 || criticChanges.length > 0;
-  const activeComments = activeCommentIds
+  const suggestionCommentIds = new Set(
+    criticChanges.flatMap((change) => change.commentIds),
+  );
+  const visibleCommentGroups = commentGroups
+    .map((group) => ({
+      ...group,
+      commentIds: expandCommentIdsForLegacyReferences(
+        group.commentIds,
+        comments,
+      ).filter((commentId) => !suggestionCommentIds.has(commentId)),
+    }))
+    .filter((group) =>
+      group.commentIds.some((commentId) => comments.has(commentId)),
+    );
+  const activeCommentGroup = selectedCommentId
+    ? visibleCommentGroups.find((group) =>
+        group.commentIds.includes(selectedCommentId),
+      )
+    : null;
+  const activeCommentPanelIds =
+    activeCommentGroup && activeCommentGroup.commentIds.length > 0
+      ? activeCommentGroup.commentIds
+      : selectedCommentId
+        ? getCommentThreadPanelIds(selectedCommentId, comments)
+        : activeCommentIds;
+  const activeCommentTop = activeCommentGroup
+    ? Math.max(0, activeCommentGroup.anchorBottom + 8)
+    : 0;
+  const activeCommentLeft = activeCommentGroup
+    ? Math.max(0, (activeCommentGroup.anchorRight ?? 0) + 8)
+    : 0;
+  const hasReviewRail = layout === "embedded-demo" || criticChanges.length > 0;
+  const activeComments = activeCommentPanelIds
     .map((commentId) => comments.get(commentId))
     .filter((comment): comment is CriticComment => Boolean(comment));
   const contentCardClass =
-    "rounded-[0.75rem] border border-[#E9E9E8] dark:border-slate-700 bg-white dark:bg-card shadow-[0_18px_44px_rgba(57,47,38,0.08)] dark:shadow-[0_18px_44px_rgba(0,0,0,0.35)]";
+    layout === "embedded-demo"
+      ? "rounded-[0.75rem] border border-[#E9E9E8] dark:border-slate-700 bg-white dark:bg-card shadow-[0_18px_44px_rgba(57,47,38,0.08)] dark:shadow-[0_18px_44px_rgba(0,0,0,0.35)]"
+      : "bg-transparent";
   const documentShellClass = cn(
     "document-page-shell",
     layout === "embedded-demo"
       ? "grid grid-cols-1 gap-3 p-4 min-[900px]:grid-cols-[minmax(0,min(100%,42rem))_minmax(13rem,16rem)] min-[900px]:items-start min-[900px]:justify-start"
-      : "flex flex-col gap-6 min-[1100px]:grid min-[1100px]:grid-cols-[minmax(0,46.5rem)_minmax(24rem,1fr)] min-[1100px]:items-start min-[1100px]:justify-between min-[1100px]:gap-8",
+      : "flex flex-col items-center gap-6",
     !hasReviewRail && "document-page-shell-no-comments",
-    layout !== "embedded-demo" &&
-      !hasReviewRail &&
-      "min-[1100px]:grid-cols-[minmax(0,46.5rem)] min-[1100px]:justify-center",
+    layout !== "embedded-demo" && !hasReviewRail && "justify-center",
   );
   const documentMainClass = cn(
     "document-page-main w-full min-w-0",
@@ -1876,8 +1943,8 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
   );
   const contentInsetClass = layout === "embedded-demo" ? "pb-0" : "pb-24";
   const fallbackClass = cn(
-    "document-comment-fallback mb-4",
-    layout === "embedded-demo" ? "hidden" : "min-[1100px]:hidden",
+    "document-comment-fallback",
+    layout === "embedded-demo" ? "hidden" : "",
   );
   const reviewRailClass = cn(
     "document-comment-rail",
@@ -1893,31 +1960,6 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
     >
       <div data-testid="document-page-shell" className={documentShellClass}>
         <div className={documentMainClass}>
-          {activeComments.length > 0 ? (
-            <CommentEditorList
-              comments={activeComments}
-              className={fallbackClass}
-              testId="document-comment-fallback"
-              selectedCommentId={selectedCommentId}
-              hoveredCommentId={hoveredCommentId}
-              onDeleteComment={deleteComment}
-              onUpdateComment={(commentId, nextContent) => {
-                updateComment(commentId, (current) => ({
-                  ...current,
-                  content: nextContent,
-                }));
-              }}
-              onReplyComment={replyToComment}
-              onSelectComment={selectComment}
-              onHoverComment={setHoveredCommentId}
-              pendingFocusCommentId={pendingFocusCommentId}
-              onAutoFocusComment={(commentId) => {
-                setPendingFocusCommentId((current) =>
-                  current === commentId ? null : current,
-                );
-              }}
-            />
-          ) : null}
           <div className={contentInsetClass}>
             <div
               data-testid="document-content-card"
@@ -1946,58 +1988,118 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
                     : handleSuggestInsertion
                 }
               >
-                <div data-testid="rich-text-editor">
+                <div className="relative" data-testid="rich-text-editor">
                   <EditorContent editor={editor} />
+                  {layout === "embedded-demo" ? null : (
+                    <DocumentCommentMarkers
+                      commentGroups={visibleCommentGroups}
+                      comments={comments}
+                      workingCommentIds={workingCommentIds}
+                      selectedCommentId={selectedCommentId}
+                      hoveredCommentId={hoveredCommentId}
+                      onFocusComment={focusComment}
+                      onHoverComment={setHoveredCommentId}
+                    />
+                  )}
+                  {layout !== "embedded-demo" && activeComments.length > 0 ? (
+                    <div
+                      data-testid="document-comment-popover"
+                      className={cn(
+                        "absolute z-30 w-[min(22rem,calc(100vw-4rem))] rounded-[1rem] shadow-[0_18px_48px_rgba(0,0,0,0.28)]",
+                        "border border-neutral-800 bg-[#141414] text-white",
+                      )}
+                      style={{
+                        top: activeCommentTop,
+                        left: `min(${activeCommentLeft}px, calc(100% - min(22rem, calc(100vw - 4rem))))`,
+                      }}
+                    >
+                      <CommentEditorList
+                        comments={activeComments}
+                        className={fallbackClass}
+                        variant="rail"
+                        testId="document-comment-fallback"
+                        selectedCommentId={selectedCommentId}
+                        hoveredCommentId={hoveredCommentId}
+                        onDeleteComment={deleteComment}
+                        onUpdateComment={(commentId, nextContent) => {
+                          updateComment(commentId, (current) => ({
+                            ...current,
+                            content: nextContent,
+                          }));
+                          onCommentSubmit?.(commentId);
+                        }}
+                        onSelectComment={selectComment}
+                        onHoverComment={setHoveredCommentId}
+                        pendingFocusCommentId={pendingFocusCommentId}
+                        drafts={commentDrafts}
+                        onDraftsChange={onCommentDraftsChange}
+                        editingCommentIds={editingCommentIds}
+                        onEditingCommentIdsChange={onEditingCommentIdsChange}
+                        workingCommentIds={workingCommentIds}
+                        onAutoFocusComment={(commentId) => {
+                          setPendingFocusCommentId((current) =>
+                            current === commentId ? null : current,
+                          );
+                        }}
+                      />
+                    </div>
+                  ) : null}
                 </div>
               </EditorContextMenu>
             </div>
           </div>
         </div>
-        <DocumentReviewRail
-          className={reviewRailClass}
-          layout={layout === "embedded-demo" ? "flow" : "anchored"}
-          testId="document-review-rail"
-          commentGroups={commentGroups}
-          comments={comments}
-          suggestions={criticChanges}
-          selectedCommentId={selectedCommentId}
-          hoveredCommentId={hoveredCommentId}
-          selectedChangeId={selectedChangeId}
-          hoveredChangeId={hoveredChangeId}
-          contentHeight={contentHeight}
-          onDeleteComment={deleteComment}
-          onUpdateComment={(commentId, nextContent) => {
-            updateComment(commentId, (current) => ({
-              ...current,
-              content: nextContent,
-            }));
-          }}
-          onReplyComment={replyToComment}
-          onSelectComment={selectComment}
-          onFocusComment={focusComment}
-          onHoverComment={setHoveredCommentId}
-          onAcceptSuggestion={acceptSuggestion}
-          onRejectSuggestion={rejectSuggestion}
-          onReplySuggestion={replyToSuggestion}
-          onSelectSuggestion={selectSuggestion}
-          onFocusSuggestion={focusSuggestion}
-          onHoverSuggestion={setHoveredChangeId}
-          pendingFocusCommentId={pendingFocusCommentId}
-          onAutoFocusComment={(commentId) => {
-            setPendingFocusCommentId((current) =>
-              current === commentId ? null : current,
-            );
-          }}
-          draftSuggestion={draftSuggestion}
-          onDraftSuggestionTextChange={(text) => {
-            setDraftSuggestion((current) =>
-              current ? { ...current, text } : current,
-            );
-          }}
-          onApplyDraftSuggestion={applyDraftSuggestion}
-          onCancelDraftSuggestion={() => setDraftSuggestion(null)}
-          editor={editor}
-        />
+        {hasReviewRail ? (
+          <DocumentReviewRail
+            className={reviewRailClass}
+            layout={layout === "embedded-demo" ? "flow" : "anchored"}
+            testId="document-review-rail"
+            commentGroups={layout === "embedded-demo" ? commentGroups : []}
+            comments={comments}
+            suggestions={criticChanges}
+            selectedCommentId={selectedCommentId}
+            hoveredCommentId={hoveredCommentId}
+            selectedChangeId={selectedChangeId}
+            hoveredChangeId={hoveredChangeId}
+            contentHeight={contentHeight}
+            onDeleteComment={deleteComment}
+            onUpdateComment={(commentId, nextContent) => {
+              updateComment(commentId, (current) => ({
+                ...current,
+                content: nextContent,
+              }));
+              onCommentSubmit?.(commentId);
+            }}
+            onSelectComment={selectComment}
+            onFocusComment={focusComment}
+            onHoverComment={setHoveredCommentId}
+            drafts={commentDrafts}
+            onDraftsChange={onCommentDraftsChange}
+            editingCommentIds={editingCommentIds}
+            onEditingCommentIdsChange={onEditingCommentIdsChange}
+            workingCommentIds={workingCommentIds}
+            onAcceptSuggestion={acceptSuggestion}
+            onRejectSuggestion={rejectSuggestion}
+            onSelectSuggestion={selectSuggestion}
+            onFocusSuggestion={focusSuggestion}
+            onHoverSuggestion={setHoveredChangeId}
+            pendingFocusCommentId={pendingFocusCommentId}
+            onAutoFocusComment={(commentId) => {
+              setPendingFocusCommentId((current) =>
+                current === commentId ? null : current,
+              );
+            }}
+            draftSuggestion={draftSuggestion}
+            onDraftSuggestionTextChange={(text) => {
+              setDraftSuggestion((current) =>
+                current ? { ...current, text } : current,
+              );
+            }}
+            onApplyDraftSuggestion={applyDraftSuggestion}
+            onCancelDraftSuggestion={() => setDraftSuggestion(null)}
+            editor={editor}
+          />
+        ) : null}
       </div>
     </div>
   );
@@ -2079,30 +2181,88 @@ const PageCardEditorSurface = memo(function PageCardEditorSurface({
   onDirtyStateChange,
   onLocalContentChange,
   onSaveControllerChange,
+  onCommentSubmit,
   saveBlocked = false,
   forceResetKey = null,
 }: PageCardEditorSurfaceProps) {
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const workingCommentTimersRef = useRef(
+    new Map<string, ReturnType<typeof window.setTimeout>>(),
+  );
   const inFlightSaveRef = useRef<Promise<ManualSaveResult> | null>(null);
   const pendingMarkdownRef = useRef(page.content);
   const recentMarkdownRef = useRef<Set<string>>(new Set());
   const previousEditorViewModeRef = useRef<EditorViewMode>(editorViewMode);
   const lastAcceptedMarkdownRef = useRef(page.content);
   const localDirtyRef = useRef(false);
+  const draftActiveRef = useRef(false);
   const forceResetKeyRef = useRef(forceResetKey);
   const [markdown, setMarkdown] = useState(page.content);
   const [richTextSourceMarkdown, setRichTextSourceMarkdown] = useState(
     page.content,
   );
   const [richTextSourceVersion, setRichTextSourceVersion] = useState(0);
+  const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>(
+    {},
+  );
+  const [editingCommentIds, setEditingCommentIds] = useState<string[]>([]);
+  const [workingCommentIds, setWorkingCommentIds] = useState<Set<string>>(
+    () => new Set(),
+  );
 
   const reportDirtyState = useCallback(
     (isDirty: boolean) => {
       if (localDirtyRef.current === isDirty) return;
       localDirtyRef.current = isDirty;
-      onDirtyStateChange?.(isDirty);
+      onDirtyStateChange?.(isDirty || draftActiveRef.current);
     },
     [onDirtyStateChange],
+  );
+
+  const reportDraftActiveState = useCallback(
+    (isActive: boolean) => {
+      if (draftActiveRef.current === isActive) return;
+      draftActiveRef.current = isActive;
+      onDirtyStateChange?.(localDirtyRef.current || isActive);
+    },
+    [onDirtyStateChange],
+  );
+
+  useEffect(() => {
+    reportDraftActiveState(
+      editingCommentIds.length > 0 || Object.keys(commentDrafts).length > 0,
+    );
+  }, [commentDrafts, editingCommentIds.length, reportDraftActiveState]);
+
+  const markCommentWorking = useCallback(
+    (commentId: string) => {
+      setWorkingCommentIds((current) => {
+        const next = new Set(current);
+        next.add(commentId);
+        return next;
+      });
+
+      const existingTimer = workingCommentTimersRef.current.get(commentId);
+      if (existingTimer !== undefined) {
+        window.clearTimeout(existingTimer);
+      }
+
+      const timer = window.setTimeout(() => {
+        workingCommentTimersRef.current.delete(commentId);
+        setWorkingCommentIds((current) => {
+          if (!current.has(commentId)) return current;
+          const next = new Set(current);
+          next.delete(commentId);
+          return next;
+        });
+      }, 45_000);
+      workingCommentTimersRef.current.set(commentId, timer);
+
+      void Promise.resolve(onCommentSubmit?.(commentId)).catch((error) => {
+        console.error("Failed to submit comment handoff:", error);
+      });
+    },
+    [onCommentSubmit],
   );
 
   const acceptMarkdown = useCallback(
@@ -2241,6 +2401,12 @@ const PageCardEditorSurface = memo(function PageCardEditorSurface({
     forceResetKeyRef.current = forceResetKey;
 
     if (forceResetChanged) {
+      if (
+        (localDirtyRef.current || draftActiveRef.current) &&
+        markdown !== page.content
+      ) {
+        return;
+      }
       recentMarkdownRef.current.delete(page.content);
       acceptMarkdown(page.content);
       return;
@@ -2296,6 +2462,10 @@ const PageCardEditorSurface = memo(function PageCardEditorSurface({
       if (saveTimer.current) {
         clearTimeout(saveTimer.current);
       }
+      for (const timer of workingCommentTimersRef.current.values()) {
+        window.clearTimeout(timer);
+      }
+      workingCommentTimersRef.current.clear();
     };
   }, []);
 
@@ -2323,6 +2493,7 @@ const PageCardEditorSurface = memo(function PageCardEditorSurface({
 
   const effectiveRichTextSourceMarkdown =
     !localDirtyRef.current &&
+    !draftActiveRef.current &&
     !recentMarkdownRef.current.has(page.content) &&
     markdown !== page.content
       ? page.content
@@ -2342,6 +2513,12 @@ const PageCardEditorSurface = memo(function PageCardEditorSurface({
       onCommentRailPresenceChange={onCommentRailPresenceChange}
       backend={backend}
       onEditorReady={onEditorReady}
+      onCommentSubmit={markCommentWorking}
+      commentDrafts={commentDrafts}
+      onCommentDraftsChange={setCommentDrafts}
+      editingCommentIds={editingCommentIds}
+      onEditingCommentIdsChange={setEditingCommentIds}
+      workingCommentIds={workingCommentIds}
     />
   );
 });
@@ -2362,6 +2539,7 @@ export function PageCard({
   onDirtyStateChange,
   onLocalContentChange,
   onSaveControllerChange,
+  onCommentSubmit,
   saveBlocked,
   forceResetKey,
 }: PageCardProps) {
@@ -2389,6 +2567,7 @@ export function PageCard({
         onDirtyStateChange={onDirtyStateChange}
         onLocalContentChange={onLocalContentChange}
         onSaveControllerChange={onSaveControllerChange}
+        onCommentSubmit={onCommentSubmit}
         saveBlocked={saveBlocked}
         forceResetKey={forceResetKey}
       />

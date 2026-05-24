@@ -1,9 +1,10 @@
-import { Bot, Check, Pencil, Reply, Trash2, User, X } from "lucide-react";
+import { Check, Trash2, X } from "lucide-react";
 import {
-  type KeyboardEvent,
+  type Dispatch,
   type MouseEvent,
   type MutableRefObject,
   type ReactNode,
+  type SetStateAction,
   useEffect,
   useMemo,
   useRef,
@@ -16,11 +17,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "./components/ui/tooltip";
-import {
-  buildCommentThreads,
-  type CriticComment,
-  type CriticCommentThread,
-} from "./critic-markup";
+import type { CriticComment } from "./critic-markup";
 import { cn } from "./lib/utils";
 
 interface CommentEditorListProps {
@@ -35,10 +32,14 @@ interface CommentEditorListProps {
   onUpdateComment: (commentId: string, nextContent: string) => void;
   onSelectComment?: (commentId: string) => void;
   onHoverComment?: (commentId: string | null) => void;
-  onFocusComment?: (commentId: string) => void;
-  onReplyComment?: (commentId: string) => void;
   pendingFocusCommentId?: string | null;
   onAutoFocusComment?: (commentId: string) => void;
+  drafts?: Record<string, string>;
+  onDraftsChange?: Dispatch<SetStateAction<Record<string, string>>>;
+  editingCommentIds?: string[];
+  onEditingCommentIdsChange?: Dispatch<SetStateAction<string[]>>;
+  workingCommentIds?: ReadonlySet<string>;
+  isCommentEditable?: (comment: CriticComment) => boolean;
   renderCommentContent?: (context: CommentContentRenderContext) => ReactNode;
   getCommentActions?: (
     context: CommentActionsRenderContext,
@@ -68,26 +69,6 @@ export interface CommentActionsRenderContext {
   defaultActions: CommentActionDefinition[];
 }
 
-function isEditableShortcutTarget(target: EventTarget | null) {
-  if (!(target instanceof HTMLElement)) return false;
-  if (target.isContentEditable) return true;
-
-  return Boolean(
-    target.closest(
-      'input, textarea, select, [contenteditable="true"], [role="textbox"]',
-    ),
-  );
-}
-
-function isReplyShortcut(event: KeyboardEvent) {
-  return (
-    event.key.toLowerCase() === "r" &&
-    !event.metaKey &&
-    !event.ctrlKey &&
-    !event.altKey
-  );
-}
-
 export function CommentEditorList({
   comments,
   variant = "banner",
@@ -100,17 +81,31 @@ export function CommentEditorList({
   onUpdateComment,
   onSelectComment,
   onHoverComment,
-  onFocusComment,
-  onReplyComment,
   pendingFocusCommentId = null,
   onAutoFocusComment,
+  drafts: controlledDrafts,
+  onDraftsChange,
+  editingCommentIds: controlledEditingCommentIds,
+  onEditingCommentIdsChange,
+  workingCommentIds = new Set(),
+  isCommentEditable = () => true,
   renderCommentContent,
   getCommentActions,
 }: CommentEditorListProps) {
   const textareaRefs = useRef(new Map<string, HTMLTextAreaElement>());
-  const [drafts, setDrafts] = useState<Record<string, string>>({});
-  const [editingCommentIds, setEditingCommentIds] = useState<string[]>([]);
-  const threads = useMemo(() => buildCommentThreads(comments), [comments]);
+  const focusedSelectedCommentIdRef = useRef<string | null>(null);
+  const [internalDrafts, setInternalDrafts] = useState<Record<string, string>>(
+    {},
+  );
+  const [internalEditingCommentIds, setInternalEditingCommentIds] = useState<
+    string[]
+  >([]);
+  const drafts = controlledDrafts ?? internalDrafts;
+  const editingCommentIds =
+    controlledEditingCommentIds ?? internalEditingCommentIds;
+  const setDrafts = onDraftsChange ?? setInternalDrafts;
+  const setEditingCommentIds =
+    onEditingCommentIdsChange ?? setInternalEditingCommentIds;
   const commentMap = useMemo(
     () => new Map(comments.map((comment) => [comment.id, comment])),
     [comments],
@@ -118,39 +113,27 @@ export function CommentEditorList({
   const hasActiveSelection =
     !!selectedCommentId &&
     comments.some((comment) => comment.id === selectedCommentId);
-  const handleKeyDownCapture = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (!interactive || !onReplyComment) return;
-    if (!isReplyShortcut(event)) return;
-    if (isEditableShortcutTarget(event.target)) return;
-
-    const target = event.target;
-    if (!(target instanceof Element)) return;
-
-    const rootThread = target.closest<HTMLElement>(
-      "[data-comment-thread-root-id]",
-    );
-    const rootCommentId = rootThread?.dataset.commentThreadRootId;
-    if (!rootCommentId) return;
-
-    event.preventDefault();
-    event.stopPropagation();
-    onReplyComment(rootCommentId);
-  };
 
   useEffect(() => {
     const validCommentIds = new Set(comments.map((comment) => comment.id));
 
-    setDrafts((current) =>
-      Object.fromEntries(
+    setDrafts((current) => {
+      const next = Object.fromEntries(
         Object.entries(current).filter(([commentId]) =>
           validCommentIds.has(commentId),
         ),
-      ),
-    );
+      );
+
+      return Object.keys(next).length === Object.keys(current).length
+        ? current
+        : next;
+    });
     setEditingCommentIds((current) =>
-      current.filter((commentId) => validCommentIds.has(commentId)),
+      current.every((commentId) => validCommentIds.has(commentId))
+        ? current
+        : current.filter((commentId) => validCommentIds.has(commentId)),
     );
-  }, [comments]);
+  }, [comments, setDrafts, setEditingCommentIds]);
 
   useEffect(() => {
     if (!interactive) return;
@@ -159,17 +142,28 @@ export function CommentEditorList({
     const pendingComment = commentMap.get(pendingFocusCommentId);
     if (!pendingComment) return;
 
-    setDrafts((current) => ({
-      ...current,
-      [pendingFocusCommentId]:
-        current[pendingFocusCommentId] ?? pendingComment.content,
-    }));
+    setDrafts((current) => {
+      if (Object.hasOwn(current, pendingFocusCommentId)) {
+        return current;
+      }
+
+      return {
+        ...current,
+        [pendingFocusCommentId]: pendingComment.content,
+      };
+    });
     setEditingCommentIds((current) =>
       current.includes(pendingFocusCommentId)
         ? current
         : [...current, pendingFocusCommentId],
     );
-  }, [commentMap, interactive, pendingFocusCommentId]);
+  }, [
+    commentMap,
+    interactive,
+    pendingFocusCommentId,
+    setDrafts,
+    setEditingCommentIds,
+  ]);
 
   useEffect(() => {
     if (!interactive) return;
@@ -177,12 +171,15 @@ export function CommentEditorList({
     if (!editingCommentIds.includes(pendingFocusCommentId)) return;
 
     const target = textareaRefs.current.get(pendingFocusCommentId);
-    if (!target || target.offsetParent === null) return;
+    if (!target?.isConnected) return;
 
-    target.focus();
-    const cursorPosition = target.value.length;
-    target.setSelectionRange(cursorPosition, cursorPosition);
-    onAutoFocusComment?.(pendingFocusCommentId);
+    requestAnimationFrame(() => {
+      target.focus();
+      const cursorPosition = target.value.length;
+      target.setSelectionRange(cursorPosition, cursorPosition);
+      onAutoFocusComment?.(pendingFocusCommentId);
+      focusedSelectedCommentIdRef.current = pendingFocusCommentId;
+    });
   }, [
     editingCommentIds,
     interactive,
@@ -190,21 +187,36 @@ export function CommentEditorList({
     pendingFocusCommentId,
   ]);
 
+  useEffect(() => {
+    if (!interactive) return;
+    if (!selectedCommentId) {
+      focusedSelectedCommentIdRef.current = null;
+      return;
+    }
+    if (pendingFocusCommentId) return;
+    if (focusedSelectedCommentIdRef.current === selectedCommentId) return;
+
+    const selectedComment = commentMap.get(selectedCommentId);
+    if (!selectedComment || !isCommentEditable(selectedComment)) return;
+
+    const target = textareaRefs.current.get(selectedCommentId);
+    if (!target?.isConnected) return;
+
+    requestAnimationFrame(() => {
+      target.focus();
+      const cursorPosition = target.value.length;
+      target.setSelectionRange(cursorPosition, cursorPosition);
+      focusedSelectedCommentIdRef.current = selectedCommentId;
+    });
+  }, [
+    commentMap,
+    interactive,
+    isCommentEditable,
+    pendingFocusCommentId,
+    selectedCommentId,
+  ]);
+
   if (comments.length === 0) return null;
-
-  const startEditingComment = (commentId: string) => {
-    const comment = commentMap.get(commentId);
-    if (!comment) return;
-
-    setDrafts((current) => ({
-      ...current,
-      [commentId]: current[commentId] ?? comment.content,
-    }));
-    setEditingCommentIds((current) =>
-      current.includes(commentId) ? current : [...current, commentId],
-    );
-    onSelectComment?.(commentId);
-  };
 
   const stopEditingComment = (commentId: string) => {
     setEditingCommentIds((current) =>
@@ -268,32 +280,25 @@ export function CommentEditorList({
           : "space-y-1.5 px-4 py-3",
         className,
       )}
-      onKeyDownCapture={handleKeyDownCapture}
     >
-      {threads.map((thread, index) => (
-        <CommentThreadNode
-          key={thread.comment.id}
-          thread={thread}
-          depth={0}
+      {comments.map((comment, index) => (
+        <CommentItem
+          key={comment.id}
+          comment={comment}
           index={index}
-          isLast={index === threads.length - 1}
-          parentLines={[]}
           variant={variant}
           interactive={interactive}
           drafts={drafts}
-          editingCommentIds={editingCommentIds}
           selectedCommentId={selectedCommentId}
           hoveredCommentId={hoveredCommentId}
           textareaRefs={textareaRefs}
           onDeleteComment={onDeleteComment}
-          onUpdateComment={onUpdateComment}
           onSelectComment={onSelectComment}
           onHoverComment={onHoverComment}
-          onFocusComment={onFocusComment}
-          onReplyComment={onReplyComment}
-          onStartEditingComment={startEditingComment}
           onSubmitEditingComment={submitEditingComment}
           onCancelEditingComment={cancelEditingComment}
+          workingCommentIds={workingCommentIds}
+          isCommentEditable={isCommentEditable}
           renderCommentContent={renderCommentContent}
           getCommentActions={getCommentActions}
           onChangeDraft={(commentId, nextContent) => {
@@ -308,40 +313,28 @@ export function CommentEditorList({
   );
 }
 
-interface CommentThreadNodeProps {
-  thread: CriticCommentThread;
-  depth: number;
+interface CommentItemProps {
+  comment: CriticComment;
   index: number;
-  isLast: boolean;
-  parentLines: boolean[];
   variant: "banner" | "rail";
   interactive: boolean;
   drafts: Record<string, string>;
-  editingCommentIds: string[];
   selectedCommentId: string | null;
   hoveredCommentId: string | null;
   textareaRefs: MutableRefObject<Map<string, HTMLTextAreaElement>>;
   onDeleteComment: (commentId: string) => void;
-  onUpdateComment: (commentId: string, nextContent: string) => void;
   onSelectComment?: (commentId: string) => void;
   onHoverComment?: (commentId: string | null) => void;
-  onFocusComment?: (commentId: string) => void;
-  onReplyComment?: (commentId: string) => void;
-  onStartEditingComment: (commentId: string) => void;
   onSubmitEditingComment: (commentId: string) => void;
   onCancelEditingComment: (commentId: string) => void;
+  workingCommentIds: ReadonlySet<string>;
+  isCommentEditable: (comment: CriticComment) => boolean;
   renderCommentContent?: (context: CommentContentRenderContext) => ReactNode;
   getCommentActions?: (
     context: CommentActionsRenderContext,
   ) => CommentActionDefinition[];
   onChangeDraft: (commentId: string, nextContent: string) => void;
 }
-
-const COMMENT_TREE_INDENT = 20;
-const COMMENT_TREE_ELBOW_TOP = 14;
-const COMMENT_TREE_ROW_GAP = 12;
-const COMMENT_AVATAR_SIZE = 28;
-const COMMENT_AVATAR_CENTER = 16;
 
 function CommentActionButton({
   label,
@@ -392,54 +385,33 @@ function CommentActionButton({
   );
 }
 
-function CommentThreadNode({
-  thread,
-  depth,
+function CommentItem({
+  comment,
   index,
-  isLast,
-  parentLines,
   variant,
   interactive,
   drafts,
-  editingCommentIds,
   selectedCommentId,
   hoveredCommentId,
   textareaRefs,
   onDeleteComment,
-  onUpdateComment,
   onSelectComment,
   onHoverComment,
-  onFocusComment,
-  onReplyComment,
-  onStartEditingComment,
   onSubmitEditingComment,
   onCancelEditingComment,
+  workingCommentIds,
+  isCommentEditable,
   renderCommentContent,
   getCommentActions,
   onChangeDraft,
-}: CommentThreadNodeProps) {
-  const { comment, replies } = thread;
-  const hasReplies = replies.length > 0;
-  const isRootThread = depth === 0;
+}: CommentItemProps) {
   const isSelected = comment.id === selectedCommentId;
   const isHovered = comment.id === hoveredCommentId;
-  const isEditing = interactive && editingCommentIds.includes(comment.id);
-  const isAiAuthor = comment.authorType === "ai";
-  const userAuthorId = comment.authorId?.trim();
-  const authorLabel = isAiAuthor
-    ? "AI"
-    : userAuthorId && userAuthorId.toLowerCase() !== "user"
-      ? userAuthorId
-      : "Me";
-  const AuthorIcon = isAiAuthor ? Bot : User;
+  const isEditable = interactive && isCommentEditable(comment);
+  const isEditing = isEditable;
+  const isDraftComment = comment.content.trim().length === 0;
+  const isWorking = workingCommentIds.has(comment.id);
   const draftContent = drafts[comment.id] ?? comment.content;
-  const avatarTone = isAiAuthor
-    ? variant === "banner"
-      ? "border-sky-200 bg-sky-100 text-sky-700 dark:border-sky-700 dark:bg-sky-900 dark:text-sky-400"
-      : "border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-700 dark:bg-sky-900 dark:text-sky-400"
-    : variant === "banner"
-      ? "border-[#D2C7B8] bg-[#DED8CE] text-stone-700 dark:border-slate-600 dark:bg-slate-700 dark:text-stone-300"
-      : "border-[#D2C7B8] bg-[#DED8CE] text-stone-700 dark:border-slate-600 dark:bg-slate-700 dark:text-stone-300";
   const bodyTone =
     variant === "banner"
       ? isSelected
@@ -448,16 +420,12 @@ function CommentThreadNode({
           ? "bg-white"
           : "bg-transparent"
       : "bg-transparent";
-  const treeLineTone =
-    variant === "banner"
-      ? "bg-[#DED8CE]/90 dark:bg-slate-600/90"
-      : "bg-[#DED8CE]/85 dark:bg-slate-600/85";
   const defaultContent =
     comment.content.trim().length > 0 ? comment.content : "Empty comment";
   const renderedContent =
     renderCommentContent?.({
       comment,
-      depth,
+      depth: 0,
       isEditing,
       defaultContent,
     }) ?? defaultContent;
@@ -482,65 +450,25 @@ function CommentThreadNode({
           },
         },
       ]
-    : [
-        {
-          key: "reply",
-          label: "Reply",
-          icon: <Reply className="size-3.5" />,
-          compact: true,
-          onClick: (event) => {
-            event.stopPropagation();
-            onReplyComment?.(comment.id);
-          },
-        },
-        {
-          key: "edit",
-          label: "Edit",
-          icon: <Pencil className="size-3.5" />,
-          compact: true,
-          onClick: (event) => {
-            event.stopPropagation();
-            onStartEditingComment(comment.id);
-          },
-        },
-        {
-          key: "delete",
-          label: "Delete",
-          tone: "danger",
-          icon: <Trash2 className="size-3.5" />,
-          compact: true,
-          onClick: (event) => {
-            event.stopPropagation();
-            onDeleteComment(comment.id);
-          },
-        },
-      ];
+    : [];
   const actions =
     getCommentActions?.({
       comment,
-      depth,
+      depth: 0,
       isEditing,
       defaultActions,
     }) ?? defaultActions;
-  const ancestorGuideOffsets = parentLines.reduce<number[]>(
-    (offsets, showLine, guideIndex) => {
-      if (showLine) {
-        offsets.push(guideIndex * COMMENT_TREE_INDENT + COMMENT_AVATAR_CENTER);
-      }
-      return offsets;
-    },
-    [],
-  );
+  const canSubmitDraft = draftContent.trim().length > 0;
+  const submitLabel = isDraftComment ? "Add" : "Save";
 
   return (
     <div
       data-testid={`comment-${variant}-${comment.id}`}
-      data-comment-thread-root-id={isRootThread ? comment.id : undefined}
-      tabIndex={interactive && isRootThread ? 0 : undefined}
+      data-comment-thread-root-id={comment.id}
+      tabIndex={interactive ? 0 : undefined}
       className={cn(
         "relative transition-all duration-200 ease-out focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-300 dark:focus-visible:ring-slate-600",
         variant === "rail" &&
-          isRootThread &&
           (index > 0
             ? "border-t border-slate-200/80 dark:border-slate-700/80 pt-3"
             : "pt-0"),
@@ -563,109 +491,32 @@ function CommentThreadNode({
       }}
     >
       <div className="relative flex min-w-0 items-stretch">
-        {depth > 0 ? (
-          <div
-            aria-hidden="true"
-            className="pointer-events-none relative shrink-0 self-stretch"
-            style={{ width: depth * COMMENT_TREE_INDENT }}
-          >
-            {ancestorGuideOffsets.map((left) => (
-              <div
-                key={`${comment.id}-guide-${left}`}
-                data-testid="comment-tree-line"
-                className={cn("absolute top-0 bottom-0 w-px", treeLineTone)}
-                style={{
-                  left,
-                  top: -COMMENT_TREE_ROW_GAP,
-                  bottom: -COMMENT_TREE_ROW_GAP,
-                }}
-              />
-            ))}
-            <div
-              data-testid="comment-tree-line"
-              className={cn(
-                "absolute w-px",
-                treeLineTone,
-                isLast ? "" : "bottom-0",
-              )}
-              style={{
-                left: (depth - 1) * COMMENT_TREE_INDENT + COMMENT_AVATAR_CENTER,
-                top: -COMMENT_TREE_ROW_GAP,
-                ...(isLast
-                  ? {
-                      height: COMMENT_TREE_ELBOW_TOP + COMMENT_TREE_ROW_GAP,
-                    }
-                  : {
-                      bottom: -COMMENT_TREE_ROW_GAP,
-                    }),
-              }}
-            />
-            <div
-              data-testid="comment-tree-line"
-              className={cn("absolute h-px", treeLineTone)}
-              style={{
-                left: (depth - 1) * COMMENT_TREE_INDENT + COMMENT_AVATAR_CENTER,
-                top: COMMENT_TREE_ELBOW_TOP,
-                width: COMMENT_TREE_INDENT,
-              }}
-            />
-          </div>
-        ) : null}
         <div className="min-w-0 flex-1">
-          <div className="relative grid grid-cols-[2rem_minmax(0,1fr)] gap-x-2">
-            {interactive && isRootThread ? (
+          <div className="relative grid grid-cols-1">
+            {interactive && !isDraftComment ? (
               <CommentActionButton
-                label="Delete thread"
+                label="Delete comment"
                 testId={`comment-${variant}-${comment.id}-action-delete-thread`}
                 tone="danger"
                 icon={<Trash2 className="size-3.5" />}
                 compact
-                className="absolute top-0 right-0 z-20 bg-white/80 dark:bg-slate-800/80"
+                className="absolute top-0 right-0 z-20 bg-transparent text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200"
                 onClick={(event) => {
                   event.stopPropagation();
                   onDeleteComment(comment.id);
                 }}
               />
             ) : null}
-            {hasReplies ? (
-              <div
-                aria-hidden="true"
-                data-testid="comment-tree-line"
-                className={cn(
-                  "pointer-events-none absolute w-px",
-                  treeLineTone,
-                )}
-                style={{
-                  left: COMMENT_AVATAR_CENTER,
-                  top: COMMENT_AVATAR_SIZE,
-                  bottom: -COMMENT_TREE_ROW_GAP,
-                }}
-              />
-            ) : null}
-            <div className="relative flex justify-center">
-              <div
-                className={cn(
-                  "relative z-10 flex size-7 items-center justify-center rounded-full border shadow-[0_1px_2px_rgba(15,23,42,0.08)]",
-                  avatarTone,
-                )}
-                title={authorLabel}
-              >
-                <AuthorIcon className="size-3.5 shrink-0" />
-              </div>
-            </div>
             <div
               className={cn(
                 "min-w-0 rounded-xl px-0.5",
-                isRootThread && interactive && "pr-7",
+                interactive && !isDraftComment && "pr-7",
                 bodyTone,
               )}
             >
-              <div className="truncate text-[13px] font-semibold text-slate-900 dark:text-slate-100">
-                {authorLabel}
-              </div>
               <div
                 className={cn(
-                  "mt-1 text-sm leading-6 whitespace-pre-wrap",
+                  "text-sm leading-6 whitespace-pre-wrap",
                   variant === "banner"
                     ? "text-slate-800 dark:text-slate-200"
                     : "text-slate-700 dark:text-slate-300",
@@ -673,6 +524,18 @@ function CommentThreadNode({
               >
                 {isEditing ? null : renderedContent}
               </div>
+              {!isEditing && isWorking ? (
+                <div
+                  className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-sky-50 px-2 py-1 text-[11px] font-medium text-sky-700 dark:bg-sky-950/40 dark:text-sky-300"
+                  data-testid={`comment-${variant}-${comment.id}-working`}
+                >
+                  <span
+                    className="size-2 animate-pulse rounded-full bg-sky-500 dark:bg-sky-300"
+                    aria-hidden="true"
+                  />
+                  Working
+                </div>
+              ) : null}
               {isEditing ? (
                 <Textarea
                   data-testid={`comment-${variant}-${comment.id}-editor`}
@@ -685,15 +548,10 @@ function CommentThreadNode({
                   }}
                   value={draftContent}
                   placeholder={
-                    depth === 0 ? "Add your comment" : "Write a reply"
+                    isDraftComment ? "What should change?" : "Add your comment"
                   }
                   rows={1}
-                  className={cn(
-                    "mt-1 min-h-12 px-3 py-2 text-sm leading-6 md:text-sm md:leading-6",
-                    variant === "banner"
-                      ? "border-amber-200 dark:border-amber-700 bg-white/90 dark:bg-slate-800/90 text-slate-800 dark:text-slate-200"
-                      : "border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 shadow-none",
-                  )}
+                  className="mt-1 min-h-12 rounded-lg border-sky-500/90 bg-[#181818] px-3 py-2 text-sm leading-6 text-neutral-100 shadow-none placeholder:text-neutral-500 focus:border-sky-400 focus:ring-2 focus:ring-sky-500/20 md:text-sm md:leading-6"
                   onPointerDown={(event) => {
                     event.stopPropagation();
                     onSelectComment?.(comment.id);
@@ -721,61 +579,88 @@ function CommentThreadNode({
                   onFocus={() => {
                     onSelectComment?.(comment.id);
                   }}
+                  onBlur={(event) => {
+                    if (!isDraftComment || draftContent.trim().length > 0) {
+                      return;
+                    }
+
+                    const nextFocusedElement = event.relatedTarget;
+                    const commentContainer = event.currentTarget.closest(
+                      '[data-comment-thread-container="true"]',
+                    );
+                    if (
+                      nextFocusedElement instanceof Element &&
+                      commentContainer?.contains(nextFocusedElement)
+                    ) {
+                      return;
+                    }
+
+                    onCancelEditingComment(comment.id);
+                  }}
                   onChange={(event) => {
                     onChangeDraft(comment.id, event.target.value);
                   }}
                 />
               ) : null}
-              <div className="mt-2 flex flex-wrap items-center gap-1">
-                {actions.map((action) => (
-                  <CommentActionButton
-                    key={action.key}
-                    label={action.label}
-                    testId={`comment-${variant}-${comment.id}-action-${action.key}`}
-                    tone={action.tone}
-                    icon={action.icon}
-                    compact={action.compact}
-                    onClick={action.onClick}
-                  />
-                ))}
-              </div>
+              {isEditing ? (
+                <div className="mt-3 flex items-center justify-end gap-2">
+                  <Button
+                    type="button"
+                    data-testid={`comment-${variant}-${comment.id}-action-cancel`}
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 rounded-full px-3 text-sm font-medium text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100"
+                    onPointerDown={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      onCancelEditingComment(comment.id);
+                    }}
+                    onMouseDown={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      onCancelEditingComment(comment.id);
+                    }}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onCancelEditingComment(comment.id);
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="button"
+                    data-testid={`comment-${variant}-${comment.id}-action-save`}
+                    size="sm"
+                    className="h-8 rounded-full bg-sky-600 px-4 text-sm font-medium text-white hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50"
+                    disabled={!canSubmitDraft}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onSubmitEditingComment(comment.id);
+                    }}
+                  >
+                    {submitLabel}
+                  </Button>
+                </div>
+              ) : (
+                <div className="mt-2 flex flex-wrap items-center gap-1">
+                  {actions.map((action) => (
+                    <CommentActionButton
+                      key={action.key}
+                      label={action.label}
+                      testId={`comment-${variant}-${comment.id}-action-${action.key}`}
+                      tone={action.tone}
+                      icon={action.icon}
+                      compact={action.compact}
+                      onClick={action.onClick}
+                    />
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </div>
       </div>
-      {hasReplies ? (
-        <div className="mt-3 space-y-3">
-          {replies.map((reply, replyIndex) => (
-            <CommentThreadNode
-              key={reply.comment.id}
-              thread={reply}
-              depth={depth + 1}
-              index={replyIndex}
-              isLast={replyIndex === replies.length - 1}
-              parentLines={depth === 0 ? [] : [...parentLines, !isLast]}
-              variant={variant}
-              interactive={interactive}
-              drafts={drafts}
-              editingCommentIds={editingCommentIds}
-              selectedCommentId={selectedCommentId}
-              hoveredCommentId={hoveredCommentId}
-              textareaRefs={textareaRefs}
-              onDeleteComment={onDeleteComment}
-              onUpdateComment={onUpdateComment}
-              onSelectComment={onSelectComment}
-              onHoverComment={onHoverComment}
-              onFocusComment={onFocusComment}
-              onReplyComment={onReplyComment}
-              onStartEditingComment={onStartEditingComment}
-              onSubmitEditingComment={onSubmitEditingComment}
-              onCancelEditingComment={onCancelEditingComment}
-              renderCommentContent={renderCommentContent}
-              getCommentActions={getCommentActions}
-              onChangeDraft={onChangeDraft}
-            />
-          ))}
-        </div>
-      ) : null}
     </div>
   );
 }

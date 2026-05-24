@@ -21,7 +21,6 @@ interface DocumentCommentRailProps {
   className?: string;
   onDeleteComment: (commentId: string) => void;
   onUpdateComment: (commentId: string, nextContent: string) => void;
-  onReplyComment: (commentId: string) => void;
   onSelectComment: (commentId: string) => void;
   onFocusComment: (commentId: string) => void;
   onHoverComment: (commentId: string | null) => void;
@@ -38,7 +37,6 @@ export function DocumentCommentRail({
   className,
   onDeleteComment,
   onUpdateComment,
-  onReplyComment,
   onSelectComment,
   onFocusComment,
   onHoverComment,
@@ -213,9 +211,7 @@ export function DocumentCommentRail({
                 hoveredCommentId={hoveredCommentId}
                 onDeleteComment={onDeleteComment}
                 onUpdateComment={onUpdateComment}
-                onReplyComment={onReplyComment}
                 onSelectComment={onSelectComment}
-                onFocusComment={onFocusComment}
                 onHoverComment={onHoverComment}
                 pendingFocusCommentId={pendingFocusCommentId}
                 onAutoFocusComment={onAutoFocusComment}

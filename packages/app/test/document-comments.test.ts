@@ -24,17 +24,22 @@ describe("document comment layout helpers", () => {
             commentIds: JSON.stringify(["cmt-1"]),
           },
           getBoundingClientRect: () => ({
+            left: 200,
+            right: 280,
             top: 180,
             bottom: 212,
           }),
         },
       ],
       120,
+      160,
     );
 
     expect(measurements).toEqual([
       {
         commentIds: ["cmt-1"],
+        anchorLeft: 40,
+        anchorRight: 120,
         anchorTop: 60,
         anchorBottom: 92,
       },
@@ -49,11 +54,28 @@ describe("document comment layout helpers", () => {
             commentIds: JSON.stringify(["cmt-zoom"]),
           },
           getBoundingClientRect: () => ({
+            left: 180,
+            right: 260,
             top: 220,
             bottom: 284,
           }),
+          getClientRects: () => [
+            {
+              left: 180,
+              right: 220,
+              top: 220,
+              bottom: 252,
+            },
+            {
+              left: 220,
+              right: 260,
+              top: 252,
+              bottom: 284,
+            },
+          ],
         },
       ],
+      100,
       100,
       2,
     );
@@ -61,6 +83,8 @@ describe("document comment layout helpers", () => {
     expect(measurements).toEqual([
       {
         commentIds: ["cmt-zoom"],
+        anchorLeft: 40,
+        anchorRight: 80,
         anchorTop: 60,
         anchorBottom: 92,
       },
@@ -72,16 +96,22 @@ describe("document comment layout helpers", () => {
     const grouped = groupCommentAnchorMeasurements([
       {
         commentIds: ["cmt-2", "cmt-3"],
+        anchorLeft: 20,
+        anchorRight: 120,
         anchorTop: 40,
         anchorBottom: 54,
       },
       {
         commentIds: ["cmt-3", "cmt-2"],
+        anchorLeft: 18,
+        anchorRight: 96,
         anchorTop: 58,
         anchorBottom: 74,
       },
       {
         commentIds: ["cmt-4"],
+        anchorLeft: 12,
+        anchorRight: 80,
         anchorTop: 140,
         anchorBottom: 156,
       },
@@ -91,12 +121,16 @@ describe("document comment layout helpers", () => {
       {
         key: "cmt-2::cmt-3",
         commentIds: ["cmt-2", "cmt-3"],
+        anchorLeft: 18,
+        anchorRight: 96,
         anchorTop: 40,
         anchorBottom: 74,
       },
       {
         key: "cmt-4",
         commentIds: ["cmt-4"],
+        anchorLeft: 12,
+        anchorRight: 80,
         anchorTop: 140,
         anchorBottom: 156,
       },
@@ -158,7 +192,7 @@ describe("document comment layout helpers", () => {
     ]);
   });
 
-  it("expands a shared anchor into one rail item per root thread", () => {
+  it("keeps a shared anchor as one flat comment rail item", () => {
     const comments = createCommentsMap([
       {
         id: "c1",
@@ -172,7 +206,7 @@ describe("document comment layout helpers", () => {
       },
       {
         id: "c3",
-        content: "Reply",
+        content: "Former reply",
         createdAt: "2026-04-24T00:00:02.000Z",
         parentCommentId: "c2",
       },
@@ -192,18 +226,10 @@ describe("document comment layout helpers", () => {
 
     expect(items).toEqual([
       {
-        key: "c1",
+        key: "c1::c2::c3",
         anchorGroupKey: "c1::c2::c3",
         rootCommentId: "c1",
-        commentIds: ["c1"],
-        anchorTop: 200,
-        anchorBottom: 214,
-      },
-      {
-        key: "c2",
-        anchorGroupKey: "c1::c2::c3",
-        rootCommentId: "c2",
-        commentIds: ["c2", "c3"],
+        commentIds: ["c1", "c2", "c3"],
         anchorTop: 200,
         anchorBottom: 214,
       },
@@ -258,7 +284,7 @@ describe("document comment layout helpers", () => {
     ]);
   });
 
-  it("resolves reply selection to the parent root thread", () => {
+  it("treats old reply metadata as a regular selected comment", () => {
     const comments = createCommentsMap([
       {
         id: "c1",
@@ -272,13 +298,13 @@ describe("document comment layout helpers", () => {
       },
       {
         id: "c3",
-        content: "Reply",
+        content: "Former reply",
         createdAt: "2026-04-24T00:00:02.000Z",
         parentCommentId: "c2",
       },
     ]);
 
-    expect(getRootThreadIdForCommentId("c3", comments)).toBe("c2");
+    expect(getRootThreadIdForCommentId("c3", comments)).toBe("c3");
 
     const layouts = resolveCommentThreadRailLayouts(
       buildCommentThreadRailItems(
@@ -293,14 +319,15 @@ describe("document comment layout helpers", () => {
         comments,
       ),
       {
-        c1: 90,
-        c2: 120,
+        "c1::c2::c3": 120,
       },
       getRootThreadIdForCommentId("c3", comments),
       16,
     );
 
-    expect(layouts.find((layout) => layout.key === "c2")?.railTop).toBe(200);
+    expect(layouts.find((layout) => layout.key === "c1::c2::c3")?.railTop).toBe(
+      200,
+    );
   });
 
   it("pushes neighboring threads outward from the active thread with the requested gap", () => {

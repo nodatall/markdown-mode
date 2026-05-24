@@ -129,6 +129,12 @@ async function flushAnimationFrame() {
   });
 }
 
+async function flushCommentLayout() {
+  await flushAnimationFrame();
+  await flushReact();
+  await flushAnimationFrame();
+}
+
 async function selectText(editor: Editor, text: string) {
   const range = findTextRange(editor, text);
   expect(range).not.toBeNull();
@@ -146,17 +152,7 @@ async function selectText(editor: Editor, text: string) {
 
 async function addCommentWithShortcut() {
   await flushAnimationFrame();
-  const commentButton = queryByTestId<HTMLButtonElement>(
-    document,
-    "selection-menu-action-comment",
-  );
-  if (commentButton) {
-    await act(async () => {
-      commentButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-      await Promise.resolve();
-    });
-    await flushReact();
-    await flushReact();
+  if (queryByTestId(document, "comment-rail-c1-editor")) {
     return;
   }
 
@@ -260,14 +256,6 @@ function getEditable(container: HTMLElement) {
   return editable as HTMLElement;
 }
 
-function getToolbarButton(container: HTMLElement, label: string) {
-  const actionId = label.toLowerCase().replace(/[^a-z0-9]+/g, "-");
-  return getByTestId<HTMLButtonElement>(
-    container,
-    `selection-menu-action-${actionId}`,
-  );
-}
-
 type PageCardTestOptions = Partial<{
   page: Page;
   activeDocumentPath: string | null;
@@ -277,6 +265,8 @@ type PageCardTestOptions = Partial<{
   selected: boolean;
   focusRequestKey: string | null;
   saveBlocked: boolean;
+  forceResetKey: string | null;
+  onCommentSubmit: (commentId: string) => void;
 }>;
 
 type RenderedPageCard = {
@@ -300,6 +290,7 @@ async function renderPageCard(
   const backend = options.backend ?? createBackend();
   const onSave = vi.fn().mockResolvedValue(undefined);
   const onSaveStateChange = vi.fn();
+  const onCommentSubmit = vi.fn();
   let editor: Editor | null = null;
   let saveController: DocumentSaveController | null = null;
 
@@ -323,7 +314,9 @@ async function renderPageCard(
     onSaveControllerChange: (controller: DocumentSaveController | null) => {
       saveController = controller;
     },
+    onCommentSubmit: options.onCommentSubmit ?? onCommentSubmit,
     saveBlocked: options.saveBlocked ?? false,
+    forceResetKey: options.forceResetKey ?? null,
   } as const;
 
   const render = async () => {
@@ -1277,7 +1270,7 @@ describe("PageCard editor integration", () => {
     expect(getComputedStyle(editor as Element).outlineStyle).not.toBe("dotted");
   });
 
-  it("selection updates toolbar state", async () => {
+  it("selection opens the comment composer directly", async () => {
     const rendered = await renderPageCard({
       page: {
         id: "doc-2",
@@ -1290,14 +1283,146 @@ describe("PageCard editor integration", () => {
     const editor = rendered.getEditor();
 
     await selectText(editor, "Heading");
-    await flushAnimationFrame();
-    expect(rendered.container.textContent).toContain("Comment");
+    await flushCommentLayout();
+    await flushReact();
+    expect(
+      queryByTestId(rendered.container, "selection-menu-action-comment"),
+    ).toBeNull();
+    expect(
+      queryByTestId(rendered.container, "comment-rail-c1-editor"),
+    ).not.toBeNull();
+    expect(
+      getByTestId(
+        rendered.container,
+        "document-comment-marker-c1",
+      ).getAttribute("aria-label"),
+    ).toBe("New comment");
+  });
 
-    await selectText(editor, "bold");
+  it("shows an unsaved comment marker before comment text is submitted", async () => {
+    const rendered = await renderPageCard({
+      page: {
+        id: "doc-empty-comment-dismiss",
+        title: "Doc Empty Comment Dismiss",
+        content: "# Heading\n\nParagraph with **bold** text",
+      },
+      selected: true,
+    });
+
+    await selectText(rendered.getEditor(), "Paragraph");
+    await flushCommentLayout();
+    expect(
+      queryByTestId(rendered.container, "comment-rail-c1-editor"),
+    ).not.toBeNull();
+    expect(
+      getByTestId(
+        rendered.container,
+        "document-comment-marker-c1",
+      ).getAttribute("aria-label"),
+    ).toBe("New comment");
+
+    expect(
+      getByTestId<HTMLButtonElement>(
+        rendered.container,
+        "comment-rail-c1-action-save",
+      ).disabled,
+    ).toBe(true);
+    expect(
+      queryByTestId(rendered.container, "document-comment-marker-c1"),
+    ).not.toBeNull();
+    expect(rendered.onSave).not.toHaveBeenCalled();
+  });
+
+  it("drag selection opens the comment composer after pointer release", async () => {
+    const rendered = await renderPageCard({
+      page: {
+        id: "doc-drag-comment",
+        title: "Doc Drag Comment",
+        content: "# Heading\n\nParagraph with **bold** text",
+      },
+      selected: true,
+    });
+
+    const editor = rendered.getEditor();
+    const editable = getEditable(rendered.container);
+    const PointerEventCtor = window.PointerEvent ?? MouseEvent;
+
+    await act(async () => {
+      editable.dispatchEvent(
+        new PointerEventCtor("pointerdown", {
+          bubbles: true,
+          cancelable: true,
+          button: 0,
+        }),
+      );
+    });
+
+    await selectText(editor, "Paragraph with");
     await flushAnimationFrame();
     expect(
-      getToolbarButton(rendered.container, "Bold").getAttribute("aria-pressed"),
-    ).toBe("true");
+      queryByTestId(rendered.container, "comment-rail-c1-editor"),
+    ).toBeNull();
+
+    await act(async () => {
+      document.dispatchEvent(
+        new PointerEventCtor("pointerup", {
+          bubbles: true,
+          cancelable: true,
+          button: 0,
+        }),
+      );
+    });
+
+    await flushAnimationFrame();
+    expect(
+      queryByTestId(rendered.container, "comment-rail-c1-editor"),
+    ).not.toBeNull();
+  });
+
+  it("double-click selection opens the comment composer even before pointer release", async () => {
+    const rendered = await renderPageCard({
+      page: {
+        id: "doc-double-click-comment",
+        title: "Doc Double Click Comment",
+        content: "# Heading\n\nParagraph with **bold** text",
+      },
+      selected: true,
+    });
+
+    const editor = rendered.getEditor();
+    const editable = getEditable(rendered.container);
+    const PointerEventCtor = window.PointerEvent ?? MouseEvent;
+
+    await act(async () => {
+      editable.dispatchEvent(
+        new PointerEventCtor("pointerdown", {
+          bubbles: true,
+          cancelable: true,
+          button: 0,
+        }),
+      );
+    });
+
+    await selectText(editor, "Paragraph");
+    await flushAnimationFrame();
+    expect(
+      queryByTestId(rendered.container, "comment-rail-c1-editor"),
+    ).toBeNull();
+
+    await act(async () => {
+      editable.dispatchEvent(
+        new MouseEvent("dblclick", {
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+
+    await flushAnimationFrame();
+    await flushAnimationFrame();
+    expect(
+      queryByTestId(rendered.container, "comment-rail-c1-editor"),
+    ).not.toBeNull();
   });
 
   it("external page content updates replace editor content when unfocused", async () => {
@@ -1428,15 +1553,67 @@ describe("PageCard editor integration", () => {
     });
 
     await selectText(rendered.getEditor(), "alpha");
+    await flushAnimationFrame();
 
     expect(
       queryByTestId(rendered.container, "document-comment-fallback")
         ?.textContent,
     ).toContain("Comment body");
-    expect(rendered.container.textContent).toContain("Me");
+    expect(rendered.container.textContent).not.toContain("Me");
+    expect(
+      queryByTestId(rendered.container, "document-comment-markers"),
+    ).not.toBeNull();
+  });
+
+  it("keeps an in-progress comment draft through same-file live updates", async () => {
+    const rendered = await renderPageCard({
+      page: {
+        id: "doc-comment-live-draft-1",
+        title: "Doc Comment Live Draft 1",
+        content: "Comment target text",
+      },
+      selected: true,
+      forceResetKey: "initial",
+    });
+
+    await selectText(rendered.getEditor(), "target");
+    await addCommentWithShortcut();
+    await flushCommentLayout();
+
+    let commentEditor = getByTestId<HTMLTextAreaElement>(
+      rendered.container,
+      "comment-rail-c1-editor",
+    );
+
+    await act(async () => {
+      const valueSetter = Object.getOwnPropertyDescriptor(
+        HTMLTextAreaElement.prototype,
+        "value",
+      )?.set;
+      valueSetter?.call(commentEditor, "Draft survives live update");
+      commentEditor.dispatchEvent(new InputEvent("input", { bubbles: true }));
+    });
+    await flushReact();
+
+    await rendered.rerender({
+      forceResetKey: "external-1",
+      page: {
+        id: "doc-comment-live-draft-1",
+        title: "Doc Comment Live Draft 1",
+        content: "Agent updated this document on disk",
+      },
+    });
+    await flushReact();
+
+    commentEditor = getByTestId<HTMLTextAreaElement>(
+      rendered.container,
+      "comment-rail-c1-editor",
+    );
+    expect(commentEditor.value).toBe("Draft survives live update");
   });
 
   it("does not autosave a newly-created empty comment before it is submitted", async () => {
+    const onCommentSubmit = vi.fn();
     const rendered = await renderPageCard({
       page: {
         id: "doc-comment-empty-draft-1",
@@ -1444,18 +1621,26 @@ describe("PageCard editor integration", () => {
         content: "Comment target text",
       },
       selected: true,
+      onCommentSubmit,
     });
 
     await selectText(rendered.getEditor(), "target");
     await addCommentWithShortcut();
+    await flushCommentLayout();
 
     vi.useFakeTimers();
 
     const commentEditor = queryByTestId<HTMLTextAreaElement>(
       rendered.container,
-      "comment-banner-c1-editor",
+      "comment-rail-c1-editor",
     );
     expect(commentEditor).not.toBeNull();
+    expect(
+      getByTestId(
+        rendered.container,
+        "document-comment-marker-c1",
+      ).getAttribute("aria-label"),
+    ).toBe("New comment");
 
     await act(async () => {
       vi.advanceTimersByTime(1000);
@@ -1463,6 +1648,7 @@ describe("PageCard editor integration", () => {
     });
 
     expect(rendered.onSave).not.toHaveBeenCalled();
+    expect(onCommentSubmit).not.toHaveBeenCalled();
 
     await act(async () => {
       if (!commentEditor) return;
@@ -1476,7 +1662,7 @@ describe("PageCard editor integration", () => {
 
     const saveButton = queryByTestId<HTMLButtonElement>(
       rendered.container,
-      "comment-banner-c1-action-save",
+      "comment-rail-c1-action-save",
     );
     expect(saveButton).not.toBeNull();
 
@@ -1495,13 +1681,23 @@ describe("PageCard editor integration", () => {
         /\{==target==\}\{>>Draft comment<<\}\{id="c1" by="user" at="[^"]+"\}/,
       ),
     );
+    expect(onCommentSubmit).toHaveBeenCalledWith("c1");
+    expect(
+      getByTestId(
+        rendered.container,
+        "document-comment-marker-c1",
+      ).getAttribute("aria-label"),
+    ).toBe("Open comment 1");
+    expect(
+      queryByTestId(rendered.container, "document-comment-marker-c1-working"),
+    ).not.toBeNull();
   });
 
-  it("opens a reply to the root comment when r is pressed in a focused thread", async () => {
+  it("lets existing comments be edited directly without reply, edit, or inline delete actions", async () => {
     const rendered = await renderPageCard({
       page: {
-        id: "doc-comment-reply-shortcut-1",
-        title: "Doc Comment Reply Shortcut 1",
+        id: "doc-comment-direct-edit-1",
+        title: "Doc Comment Direct Edit 1",
         content:
           '{==alpha==}{>>Root comment<<}{id="root" by="user" at="2026-04-25T23:56:00.000Z"}{>>Nested reply<<}{id="child" by="user" at="2026-04-25T23:57:00.000Z" re="root"}\n\nParagraph',
       },
@@ -1510,44 +1706,67 @@ describe("PageCard editor integration", () => {
 
     await selectText(rendered.getEditor(), "alpha");
 
-    const nestedEditButton = getByTestId<HTMLButtonElement>(
+    expect(
+      queryByTestId(rendered.container, "comment-rail-root-action-reply"),
+    ).toBeNull();
+    expect(
+      queryByTestId(rendered.container, "comment-rail-root-action-edit"),
+    ).toBeNull();
+    expect(
+      queryByTestId(rendered.container, "comment-rail-root-action-delete"),
+    ).toBeNull();
+    expect(
+      queryByTestId(
+        rendered.container,
+        "comment-rail-root-action-delete-thread",
+      ),
+    ).not.toBeNull();
+
+    const rootEditor = getByTestId<HTMLTextAreaElement>(
       rendered.container,
-      "comment-banner-child-action-edit",
+      "comment-rail-root-editor",
     );
+    expect(rootEditor.value).toBe("Root comment");
+    expect(
+      rendered.container.querySelector('[data-testid="comment-tree-line"]'),
+    ).toBeNull();
 
     vi.useFakeTimers();
     await act(async () => {
-      nestedEditButton.focus();
-      nestedEditButton.dispatchEvent(
-        new KeyboardEvent("keydown", {
-          key: "r",
-          bubbles: true,
-        }),
-      );
+      const valueSetter = Object.getOwnPropertyDescriptor(
+        HTMLTextAreaElement.prototype,
+        "value",
+      )?.set;
+      valueSetter?.call(rootEditor, "Edited root comment");
+      rootEditor.dispatchEvent(new InputEvent("input", { bubbles: true }));
       await Promise.resolve();
     });
-    await flushReact();
-    await flushReact();
 
-    const replyEditor = queryByTestId<HTMLTextAreaElement>(
+    const saveButton = getByTestId<HTMLButtonElement>(
       rendered.container,
-      "comment-banner-c1-editor",
+      "comment-rail-root-action-save",
     );
-    expect(replyEditor).not.toBeNull();
+    await act(async () => {
+      saveButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+    });
 
     await act(async () => {
       vi.advanceTimersByTime(500);
       await Promise.resolve();
     });
 
-    expect(rendered.onSave).not.toHaveBeenCalled();
+    expect(rendered.onSave).toHaveBeenCalledWith(
+      "doc-comment-direct-edit-1",
+      expect.stringContaining("{>>Edited root comment<<}"),
+    );
   });
 
-  it("deletes a whole root comment thread from the thread action", async () => {
+  it("deletes only the selected comment from the far-right comment action", async () => {
     const rendered = await renderPageCard({
       page: {
-        id: "doc-delete-comment-thread-1",
-        title: "Doc Delete Comment Thread 1",
+        id: "doc-delete-comment-1",
+        title: "Doc Delete Comment 1",
         content:
           '{==alpha==}{>>Root comment<<}{id="root" by="user" at="2026-04-25T23:56:00.000Z"}{>>Nested reply<<}{id="child" by="user" at="2026-04-25T23:57:00.000Z" re="root"}\n\nParagraph',
       },
@@ -1558,7 +1777,7 @@ describe("PageCard editor integration", () => {
 
     const deleteThreadButton = queryByTestId<HTMLButtonElement>(
       rendered.container,
-      "comment-banner-root-action-delete-thread",
+      "comment-rail-root-action-delete-thread",
     );
     expect(deleteThreadButton).not.toBeNull();
 
@@ -1578,17 +1797,17 @@ describe("PageCard editor integration", () => {
     const savedMarkdown = rendered.onSave.mock.calls[0]?.[1];
     expect(savedMarkdown).toContain("alpha");
     expect(savedMarkdown).not.toContain("Root comment");
-    expect(savedMarkdown).not.toContain("Nested reply");
+    expect(savedMarkdown).toContain("Nested reply");
     expect(savedMarkdown).not.toContain('id="root"');
-    expect(savedMarkdown).not.toContain('id="child"');
+    expect(savedMarkdown).toContain('id="child"');
   });
 
-  it("renders suggestion replies only inside the suggestion card", async () => {
+  it("renders suggestion comments only inside the suggestion card", async () => {
     const commentText = "Looks good as an inserted phrase.";
     const rendered = await renderPageCard({
       page: {
-        id: "doc-suggestion-reply-1",
-        title: "Doc Suggestion Reply 1",
+        id: "doc-suggestion-comment-1",
+        title: "Doc Suggestion Comment 1",
         content: `This sentence includes an insertion: {++clearer wording++}{id="s1" by="user" at="2026-04-25T23:55:00.000Z"}{>>${commentText}<<}{id="c1" by="user" at="2026-04-25T23:56:00.000Z" re="s1"}`,
       },
       selected: true,
@@ -1603,7 +1822,7 @@ describe("PageCard editor integration", () => {
     expect(railText.split(commentText).length - 1).toBe(1);
   });
 
-  it("renders suggestions as comment-style author bubbles", async () => {
+  it("renders suggestions without reviewer identity labels", async () => {
     const rendered = await renderPageCard({
       page: {
         id: "doc-suggestion-bubble-1",
@@ -1621,12 +1840,12 @@ describe("PageCard editor integration", () => {
     );
     const suggestionText = suggestionThread?.textContent ?? "";
 
-    expect(suggestionText).toContain("AI");
+    expect(suggestionText).not.toContain("AI");
     expect(suggestionText).toContain('Delete: "conversation"');
     expect(suggestionText).not.toContain("Deletion");
   });
 
-  it("renders suggestion replies through the regular comment tree", async () => {
+  it("renders suggestion comments without nested reply UI", async () => {
     const rendered = await renderPageCard({
       page: {
         id: "doc-suggestion-tree-1",
@@ -1649,14 +1868,14 @@ describe("PageCard editor integration", () => {
     expect(suggestionThread?.textContent).toContain("Looks good.");
     expect(
       suggestionThread?.querySelector('[data-testid="comment-tree-line"]'),
-    ).not.toBeNull();
+    ).toBeNull();
   });
 
   it("preserves suggestion color when comments are attached to suggestion text", async () => {
     const rendered = await renderPageCard({
       page: {
-        id: "doc-suggestion-reply-color-1",
-        title: "Doc Suggestion Reply Color 1",
+        id: "doc-suggestion-comment-color-1",
+        title: "Doc Suggestion Comment Color 1",
         content:
           'This sentence includes {++clearer wording++}{id="s1" by="user" at="2026-04-25T23:55:00.000Z"}{>>Looks good.<<}{id="c1" by="user" at="2026-04-25T23:56:00.000Z" re="s1"}',
       },
@@ -1729,12 +1948,16 @@ describe("PageCard editor integration", () => {
         content: "{==alpha==}{>>Comment body<<}\n\nJust text",
       },
     });
+    await flushAnimationFrame();
 
     expect(
       rendered.container
         .querySelector('[data-testid="document-page-shell"]')
         ?.classList.contains("document-page-shell-no-comments"),
-    ).toBe(false);
+    ).toBe(true);
+    expect(
+      queryByTestId(rendered.container, "document-comment-markers"),
+    ).not.toBeNull();
   });
 
   it("document props churn does not lose editor content or selection", async () => {

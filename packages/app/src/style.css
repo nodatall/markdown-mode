@@ -55,6 +55,7 @@
 
   body {
     @apply antialiased bg-background text-foreground;
+    background-color: #121413;
     font-family: var(--font-sans);
   }
 
@@ -128,7 +129,7 @@
   }
 
   .tiptap .comment-decoration {
-    @apply px-0.5 text-inherit;
+    @apply text-inherit;
     background-color: #fff5c7;
     box-decoration-break: clone;
     -webkit-box-decoration-break: clone;

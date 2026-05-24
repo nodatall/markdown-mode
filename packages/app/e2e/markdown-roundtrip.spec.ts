@@ -24,7 +24,7 @@ test.describe("markdown round-trips", () => {
     removeMarkdownProject(projectDir);
   });
 
-  test("toggles rich text and code mode without rewriting literal CriticMarkup @smoke", async ({
+  test("opens rich text and code routes without rewriting literal CriticMarkup @smoke", async ({
     page,
   }) => {
     const original = [
@@ -49,16 +49,16 @@ test.describe("markdown round-trips", () => {
       "Round Trip",
     );
 
-    await page.getByTestId("document-editor-view-toggle").click();
+    await openMarkdownFile(page, filePath, "code");
     await expect(codeEditor(page)).toContainText("{>>not review feedback<<}");
 
-    await page.getByTestId("document-editor-view-toggle").click();
+    await openMarkdownFile(page, filePath);
     await expect(page.getByTestId("rich-text-editor")).toContainText(
       "Round Trip",
     );
     expect(readProjectFile(projectDir, "roundtrip.md")).toBe(original);
 
-    logE2eEvent("markdown-roundtrip.toggle-preserved", {
+    logE2eEvent("markdown-roundtrip.routes-preserved", {
       file: "roundtrip.md",
     });
   });

@@ -1,7 +1,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { TooltipProvider } from "@/components/ui/tooltip";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import {
   Homepage,
   HomepageSubtitle,
@@ -329,9 +329,7 @@ describe("Homepage", () => {
     expect(container.textContent).toContain(
       "Keep the format section as proof that the review data is portable Markdown.",
     );
-    expect(container.textContent).toContain(
-      "Sounds good. I'll move it above that section.",
-    );
+    expect(container.textContent).not.toContain("Sounds good.");
 
     await click(cta);
 
@@ -751,7 +749,7 @@ describe("Homepage", () => {
         'a[href="https://developers.notion.com/guides/data-apis/enhanced-markdown"]',
       )?.textContent,
     ).toContain("Notion-flavored Markdown");
-    expect(container.textContent).toContain("Threaded review");
+    expect(container.textContent).toContain("Inline review");
     expect(container.textContent).toContain("Roughdraft extensions");
     expect(container.textContent).toContain("Attribute metadata");
     expect(container.textContent).toContain("Substitution");

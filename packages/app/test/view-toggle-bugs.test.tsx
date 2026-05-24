@@ -20,14 +20,17 @@ import type {
 
 function createBackend({
   watcherCount,
+  projectPath,
 }: {
   watcherCount?: number;
+  projectPath?: string;
 } = {}): StorageBackend {
   const backend: StorageBackend = {
     info: {
       kind: "local-storage",
       label: "Test backend",
       detail: "In-memory",
+      projectPath,
     },
     canManageProjects: false,
     async getMarkdownFile(relativePath) {
@@ -289,16 +292,12 @@ describe("saving/saved status indicator (issue 2 fix)", () => {
           activeDocumentPath="test.md"
           documentFilenameLabel="test.md"
           documentEditorViewMode="rich-text"
-          onDocumentEditorViewModeChange={() => {}}
           onSaveDocument={onSaveDocument}
           onDocumentSaveStateChange={() => {}}
           onDocumentDirtyStateChange={() => {}}
           onDocumentLocalContentChange={() => {}}
           documentDiskChangeState={documentDiskChangeState}
           documentForceResetKey={null}
-          onReloadDocumentFromDisk={() => {}}
-          onKeepEditingWithoutAutosave={() => {}}
-          onOverwriteDocumentOnDisk={() => {}}
           onCompleteReview={async () => ({ delivered: false })}
           backend={createBackend({ watcherCount })}
         />,
@@ -346,7 +345,9 @@ describe("saving/saved status indicator (issue 2 fix)", () => {
     );
     expect(stack).not.toBeNull();
     expect(doneReviewingButton).toBeDefined();
-    expect(doneReviewingButton?.textContent).toContain("I'm done");
+    expect(doneReviewingButton?.getAttribute("aria-label")).toBe(
+      "Done Reviewing",
+    );
     expect(doneReviewingButton?.textContent).not.toContain("Saved");
     expect(stack?.textContent).toContain("Saved");
   });
@@ -356,7 +357,7 @@ describe("saving/saved status indicator (issue 2 fix)", () => {
 
     const stack = queryByTestId(container, "document-status-stack");
     expect(stack).not.toBeNull();
-    expect(stack?.textContent).not.toContain("I'm done");
+    expect(queryByTestId(container, "review-handoff-button")).toBeNull();
     expect(stack?.textContent).toContain("Saved");
   });
 
@@ -407,11 +408,11 @@ describe("saving/saved status indicator (issue 2 fix)", () => {
     expect(container.textContent).toContain("Save conflict");
   });
 
-  it("shows conflict status without replacing the existing conflict banner", async () => {
+  it("shows disk conflict in save status without rendering a conflict banner", async () => {
     await renderWorkspace({ documentDiskChangeState: "conflict" });
 
     expect(container.textContent).toContain("Save conflict");
-    expect(container.textContent).toContain("This file changed on disk");
+    expect(queryByTestId(container, "file-conflict-notice")).toBeNull();
     expect(
       getByTestId(container, "document-save-status").textContent,
     ).toContain("Save conflict");
@@ -481,16 +482,12 @@ describe("interaction mode preserved across view toggle (issue 3 fix)", () => {
             activeDocumentPath="test.md"
             documentFilenameLabel="test.md"
             documentEditorViewMode={viewMode}
-            onDocumentEditorViewModeChange={() => {}}
             onSaveDocument={async () => {}}
             onDocumentSaveStateChange={() => {}}
             onDocumentDirtyStateChange={() => {}}
             onDocumentLocalContentChange={() => {}}
             documentDiskChangeState="clean"
             documentForceResetKey={null}
-            onReloadDocumentFromDisk={() => {}}
-            onKeepEditingWithoutAutosave={() => {}}
-            onOverwriteDocumentOnDisk={() => {}}
             onCompleteReview={async () => ({ delivered: false })}
             backend={createBackend()}
           />,
@@ -498,30 +495,32 @@ describe("interaction mode preserved across view toggle (issue 3 fix)", () => {
       });
     };
 
-    // Mount with rich-text → mode is "editing" by default
+    // Mount with rich-text.
     await renderWorkspace("rich-text");
-    expect(
-      getByTestId(container, "document-mode-trigger").textContent,
-    ).toContain("editing");
+    expect(queryByTestId(container, "document-mode-trigger")).toBeNull();
+    expect(queryByTestId(container, "rich-text-editor")).not.toBeNull();
 
-    // Rerender with code view (same component instance, no remount) →
-    // mode stays "editing" because the component is not destroyed.
+    // Rerender with code view (same component instance, no remount).
     await renderWorkspace("code");
-    expect(
-      getByTestId(container, "document-mode-trigger").textContent,
-    ).toContain("editing");
+    expect(queryByTestId(container, "markdown-code-editor")).not.toBeNull();
   });
 });
 
 describe("review handoff watcher affordance", () => {
   let container: HTMLDivElement;
   let root: Root;
+  let writeText: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
     setupDomMocks();
+    writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
     (
       globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
     ).IS_REACT_ACT_ENVIRONMENT = true;
@@ -538,29 +537,34 @@ describe("review handoff watcher affordance", () => {
   async function renderWorkspace({
     getWatcherCount,
     onCompleteReview = async () => ({ delivered: false }),
+    content = "Hello world",
+    activeDocumentPath = "test.md",
+    projectPath,
   }: {
     getWatcherCount: () => number;
     onCompleteReview?: () => Promise<CompleteReviewResult>;
+    content?: string;
+    activeDocumentPath?: string;
+    projectPath?: string;
   }) {
     await act(async () => {
       root.render(
         <DocumentWorkspace
-          documentPage={createPage()}
-          activeDocumentPath="test.md"
+          documentPage={createPage(content)}
+          activeDocumentPath={activeDocumentPath}
           documentFilenameLabel="test.md"
           documentEditorViewMode="rich-text"
-          onDocumentEditorViewModeChange={() => {}}
           onSaveDocument={async () => {}}
           onDocumentSaveStateChange={() => {}}
           onDocumentDirtyStateChange={() => {}}
           onDocumentLocalContentChange={() => {}}
           documentDiskChangeState="clean"
           documentForceResetKey={null}
-          onReloadDocumentFromDisk={() => {}}
-          onKeepEditingWithoutAutosave={() => {}}
-          onOverwriteDocumentOnDisk={() => {}}
           onCompleteReview={onCompleteReview}
-          backend={createBackend({ watcherCount: getWatcherCount() })}
+          backend={createBackend({
+            watcherCount: getWatcherCount(),
+            projectPath,
+          })}
         />,
       );
       await Promise.resolve();
@@ -574,10 +578,36 @@ describe("review handoff watcher affordance", () => {
 
     await renderWorkspace({ getWatcherCount: () => 0, onCompleteReview });
 
-    expect(container.textContent).not.toContain("I'm done");
+    expect(queryByTestId(container, "review-handoff-button")).toBeNull();
     expect(container.textContent).not.toContain("Review ready");
     expect(container.textContent).not.toContain("Copy prompt");
     expect(onCompleteReview).not.toHaveBeenCalled();
+  });
+
+  it("copies a paste-ready review prompt when comments exist and no agent is watching", async () => {
+    await renderWorkspace({
+      getWatcherCount: () => 0,
+      projectPath: "/tmp/project",
+      content:
+        'Please review {==this claim==}{>>Needs evidence.<<}{id="c1" by="Nora" at="2026-05-24T12:00:00.000Z"} and {~~old wording~>new wording~~}{id="s1" by="AI" at="2026-05-24T12:01:00.000Z"}.',
+    });
+
+    const copyButton = getByTestId<HTMLButtonElement>(
+      container,
+      "review-copy-prompt-button",
+    );
+    expect(copyButton.getAttribute("aria-label")).toBe("Copy review prompt");
+
+    await click(copyButton);
+
+    expect(writeText).toHaveBeenCalledOnce();
+    const prompt = writeText.mock.calls[0]?.[0] as string;
+    expect(prompt).toContain("File: /tmp/project/test.md");
+    expect(prompt).toContain("Comment c1 by Nora");
+    expect(prompt).toContain('Reference: "this claim"');
+    expect(prompt).toContain('Comment: "Needs evidence."');
+    expect(prompt).toContain("Suggestion s1");
+    expect(prompt).toContain('Replace "old wording" with "new wording".');
   });
 
   it("shows the done reviewing button only for an active watcher", async () => {
@@ -595,12 +625,16 @@ describe("review handoff watcher affordance", () => {
     expect(container.textContent).toContain("Agent watching");
 
     if (!doneReviewingButton) {
-      throw new Error("I'm done button not found");
+      throw new Error("Done Reviewing button not found");
     }
     await click(doneReviewingButton);
 
     expect(onCompleteReview).toHaveBeenCalledOnce();
-    expect(container.textContent).toContain("Sent");
+    expect(
+      getByTestId(container, "review-handoff-button").getAttribute(
+        "aria-label",
+      ),
+    ).toBe("Sent");
     expect(container.textContent).not.toContain("Agent notified");
     expect(container.textContent).not.toContain("Review ready");
     expect(container.textContent).not.toContain("Copy prompt");
@@ -618,13 +652,17 @@ describe("review handoff watcher affordance", () => {
       "review-handoff-button",
     );
     if (!doneReviewingButton) {
-      throw new Error("I'm done button not found");
+      throw new Error("Done Reviewing button not found");
     }
     await click(doneReviewingButton);
 
     expect(onCompleteReview).toHaveBeenCalledOnce();
-    expect(container.textContent).toContain("Not sent");
-    expect(container.textContent).not.toContain("I'm done");
+    expect(container.textContent).toContain("Review not sent");
+    expect(
+      getByTestId(container, "review-handoff-button").getAttribute(
+        "aria-label",
+      ),
+    ).toBe("Not sent");
   });
 
   it("keeps visible sent feedback after the watcher receives the event", async () => {
@@ -646,7 +684,7 @@ describe("review handoff watcher affordance", () => {
       "review-handoff-button",
     );
     if (!doneReviewingButton) {
-      throw new Error("I'm done button not found");
+      throw new Error("Done Reviewing button not found");
     }
 
     await click(doneReviewingButton);
@@ -656,9 +694,12 @@ describe("review handoff watcher affordance", () => {
     });
 
     expect(onCompleteReview).toHaveBeenCalledOnce();
-    expect(container.textContent).toContain("Sent");
+    expect(
+      getByTestId(container, "review-handoff-button").getAttribute(
+        "aria-label",
+      ),
+    ).toBe("Sent");
     expect(container.textContent).not.toContain("Agent notified");
-    expect(container.textContent).not.toContain("I'm done");
   });
 
   it("lets a new watcher start another handoff after sent feedback", async () => {
@@ -680,7 +721,7 @@ describe("review handoff watcher affordance", () => {
       "review-handoff-button",
     );
     if (!doneReviewingButton) {
-      throw new Error("I'm done button not found");
+      throw new Error("Done Reviewing button not found");
     }
 
     await click(doneReviewingButton);
@@ -689,8 +730,11 @@ describe("review handoff watcher affordance", () => {
       onCompleteReview,
     });
 
-    expect(container.textContent).toContain("Sent");
-    expect(container.textContent).not.toContain("I'm done");
+    expect(
+      getByTestId(container, "review-handoff-button").getAttribute(
+        "aria-label",
+      ),
+    ).toBe("Sent");
 
     watcherCount = 1;
     await renderWorkspace({
@@ -701,7 +745,11 @@ describe("review handoff watcher affordance", () => {
       await Promise.resolve();
     });
 
-    expect(container.textContent).toContain("I'm done");
+    expect(
+      getByTestId(container, "review-handoff-button").getAttribute(
+        "aria-label",
+      ),
+    ).toBe("Done Reviewing");
     expect(container.textContent).not.toContain("Sent");
   });
 });

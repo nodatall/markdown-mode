@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "pnpm --filter @roughdraft/rfm build && tsc",
+    "build": "corepack pnpm --filter @roughdraft/rfm build && tsc",
     "dev": "tsx watch src/dev.ts",
     "test": "vitest run"
   },

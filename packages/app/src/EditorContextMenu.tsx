@@ -1,24 +1,8 @@
 import type { Editor } from "@tiptap/react";
 import { useEditorState } from "@tiptap/react";
+import { ExternalLink, Trash2 } from "lucide-react";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  Bold,
-  Code2,
-  Check,
-  ExternalLink,
-  Italic,
-  Link2,
-  List,
-  ListOrdered,
-  MessageSquarePlus,
-  Minus,
-  Plus,
-  Quote,
-  Replace,
-  Trash2,
-  X,
-} from "lucide-react";
 import {
   getAddCommentShortcutLabel,
   matchesAddCommentShortcut,
@@ -40,11 +24,6 @@ interface EditorContextMenuProps {
 interface MenuPosition {
   x: number;
   y: number;
-}
-
-interface SelectionActionPosition {
-  left: number;
-  top: number;
 }
 
 interface LinkPopoverState {
@@ -89,36 +68,9 @@ function resolveEditableLinkTarget(
   return backend.resolveFileUrl(value) ?? fallback;
 }
 
-function toTestIdSegment(value: string) {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "");
-}
-
 function getElementFromDomNode(node: Node | null) {
   if (!node) return null;
   return node instanceof Element ? node : node.parentElement;
-}
-
-function getContainedSelectionRange(container: HTMLElement) {
-  const selection = window.getSelection();
-
-  if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
-    return null;
-  }
-
-  const range = selection.getRangeAt(0);
-  const ancestor =
-    range.commonAncestorContainer instanceof Element
-      ? range.commonAncestorContainer
-      : range.commonAncestorContainer.parentElement;
-
-  if (!ancestor || !container.contains(ancestor)) {
-    return null;
-  }
-
-  return range;
 }
 
 function findActiveLinkAnchor(
@@ -156,41 +108,25 @@ function findActiveLinkAnchor(
   return null;
 }
 
-function SelectionMenuButton({
-  label,
-  icon,
-  active = false,
-  disabled = false,
-  onClick,
-}: {
-  label: string;
-  icon: ReactNode;
-  active?: boolean;
-  disabled?: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      data-testid={`selection-menu-action-${toTestIdSegment(label)}`}
-      className={`inline-flex size-9 items-center justify-center rounded-xl border text-slate-600 dark:text-slate-400 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-300 dark:focus-visible:ring-slate-600 ${
-        active
-          ? "border-slate-900 bg-slate-900 dark:border-slate-100 dark:bg-slate-100 text-white dark:text-slate-900 shadow-[0_8px_18px_rgba(15,23,42,0.18)]"
-          : "border-transparent hover:bg-slate-100 dark:hover:bg-slate-700 hover:text-slate-900 dark:hover:text-slate-100"
-      } disabled:cursor-not-allowed disabled:opacity-40`}
-      onMouseDown={(event) => {
-        event.preventDefault();
-        event.stopPropagation();
-      }}
-      onClick={onClick}
-      disabled={disabled}
-      aria-label={label}
-      aria-pressed={active}
-      title={label}
-    >
-      {icon}
-    </button>
-  );
+function selectionContainsCommentRef(editor: Editor) {
+  const { from, to, empty, $from } = editor.state.selection;
+  const commentRefMark = editor.state.schema.marks.commentRef;
+
+  if (!commentRefMark) return false;
+
+  if (empty) {
+    return $from.marks().some((mark) => mark.type === commentRefMark);
+  }
+
+  let hasCommentRef = false;
+  editor.state.doc.nodesBetween(from, to, (node) => {
+    if (hasCommentRef) return false;
+    if (!node.isText) return;
+
+    hasCommentRef = node.marks.some((mark) => mark.type === commentRefMark);
+  });
+
+  return hasCommentRef;
 }
 
 export function EditorContextMenu({
@@ -204,8 +140,6 @@ export function EditorContextMenu({
   children,
 }: EditorContextMenuProps) {
   const [position, setPosition] = useState<MenuPosition | null>(null);
-  const [selectionActionPosition, setSelectionActionPosition] =
-    useState<SelectionActionPosition | null>(null);
   const [linkPopoverState, setLinkPopoverState] =
     useState<LinkPopoverState | null>(null);
   const [linkDraft, setLinkDraft] = useState("");
@@ -213,49 +147,19 @@ export function EditorContextMenu({
   const containerRef = useRef<HTMLDivElement>(null);
   const linkPopoverRef = useRef<HTMLDivElement>(null);
   const linkInputRef = useRef<HTMLInputElement>(null);
+  const autoCommentSelectionRef = useRef<string | null>(null);
+  const pointerSelectingRef = useRef(false);
   const shortcutLabel = getAddCommentShortcutLabel(getNavigatorPlatform());
   const selectionMenuState = useEditorState({
     editor,
     selector: ({ editor: currentEditor }) => ({
-      isBoldActive: currentEditor?.isActive("bold") ?? false,
-      isItalicActive: currentEditor?.isActive("italic") ?? false,
-      isCodeActive: currentEditor?.isActive("code") ?? false,
-      isBulletListActive: currentEditor?.isActive("bulletList") ?? false,
-      isOrderedListActive: currentEditor?.isActive("orderedList") ?? false,
-      isBlockquoteActive: currentEditor?.isActive("blockquote") ?? false,
-      isLinkActive: currentEditor?.isActive("link") ?? false,
       activeCriticChangeId:
         (currentEditor?.getAttributes("criticChange").changeId as
           | string
           | null) ?? null,
-      canToggleBold:
-        currentEditor?.can().chain().focus().toggleBold().run() ?? false,
-      canToggleItalic:
-        currentEditor?.can().chain().focus().toggleItalic().run() ?? false,
-      canToggleCode:
-        currentEditor?.can().chain().focus().toggleCode().run() ?? false,
-      canToggleBulletList:
-        currentEditor?.can().chain().focus().toggleBulletList().run() ?? false,
-      canToggleOrderedList:
-        currentEditor?.can().chain().focus().toggleOrderedList().run() ?? false,
-      canToggleBlockquote:
-        currentEditor?.can().chain().focus().toggleBlockquote().run() ?? false,
     }),
   }) ?? {
-    isBoldActive: false,
-    isItalicActive: false,
-    isCodeActive: false,
-    isBulletListActive: false,
-    isOrderedListActive: false,
-    isBlockquoteActive: false,
-    isLinkActive: false,
     activeCriticChangeId: null,
-    canToggleBold: false,
-    canToggleItalic: false,
-    canToggleCode: false,
-    canToggleBulletList: false,
-    canToggleOrderedList: false,
-    canToggleBlockquote: false,
   };
 
   const close = useCallback(() => {
@@ -266,44 +170,35 @@ export function EditorContextMenu({
     setLinkPopoverState(null);
   }, []);
 
-  const updateSelectionActionPosition = useCallback(() => {
-    if (
-      !editor?.isFocused ||
-      (editor.state.selection.empty && !onSuggestInsertion)
-    ) {
-      setSelectionActionPosition(null);
+  const maybeAddCommentForSelection = useCallback(() => {
+    if (!editor || !onAddComment || !editor.isFocused) {
+      autoCommentSelectionRef.current = null;
       return;
     }
 
-    const container = containerRef.current;
-    if (!container) {
-      setSelectionActionPosition(null);
+    if (pointerSelectingRef.current) {
       return;
     }
 
-    const range = getContainedSelectionRange(container);
+    const { selection } = editor.state;
 
-    if (!range) {
-      setSelectionActionPosition(null);
+    if (selection.empty) {
+      autoCommentSelectionRef.current = null;
       return;
     }
 
-    const boundingRect = range.getBoundingClientRect();
-    if (boundingRect.width === 0 && boundingRect.height === 0) {
-      setSelectionActionPosition(null);
+    if (selectionContainsCommentRef(editor)) {
       return;
     }
 
-    const containerRect = container.getBoundingClientRect();
-    const nextLeft =
-      boundingRect.left + boundingRect.width / 2 - containerRect.left;
-    const nextTop = boundingRect.top - containerRect.top - 14;
+    const selectionKey = `${selection.from}:${selection.to}:${editor.state.doc.content.size}`;
+    if (autoCommentSelectionRef.current === selectionKey) {
+      return;
+    }
 
-    setSelectionActionPosition({
-      left: nextLeft,
-      top: nextTop,
-    });
-  }, [editor, onSuggestInsertion]);
+    autoCommentSelectionRef.current = selectionKey;
+    onAddComment();
+  }, [editor, onAddComment]);
 
   const updateLinkPopover = useCallback(() => {
     setLinkPopoverState((current) => {
@@ -397,40 +292,6 @@ export function EditorContextMenu({
     [backend, editor, resolveLinkUrl],
   );
 
-  const openLinkPopover = useCallback(() => {
-    if (!editor || !containerRef.current) return;
-
-    const anchor = findActiveLinkAnchor(editor, containerRef.current);
-
-    if (anchor) {
-      openExistingLinkPopover(anchor);
-      return;
-    }
-
-    const range = getContainedSelectionRange(containerRef.current);
-    if (!range) return;
-
-    const rect = range.getBoundingClientRect();
-    if (rect.width === 0 && rect.height === 0) return;
-
-    const rawHref =
-      (editor.getAttributes("link").dataMarkdownSrc as string | null) || "";
-
-    setLinkPopoverState({
-      href: resolveEditableLinkTarget(
-        rawHref,
-        backend,
-        resolveLinkUrl,
-        rawHref || "https://",
-      ),
-      rawHref,
-      left: rect.left + rect.width / 2,
-      top: rect.top - 12,
-      existingLink: false,
-      focusInput: true,
-    });
-  }, [backend, editor, openExistingLinkPopover, resolveLinkUrl]);
-
   const applyLink = useCallback(
     (nextValue: string) => {
       if (!editor) return;
@@ -508,13 +369,42 @@ export function EditorContextMenu({
 
     const schedulePositionUpdate = () => {
       requestAnimationFrame(() => {
-        updateSelectionActionPosition();
         updateLinkPopover();
+        maybeAddCommentForSelection();
       });
     };
 
     const clearSelectionAction = () => {
-      setSelectionActionPosition(null);
+      autoCommentSelectionRef.current = null;
+      pointerSelectingRef.current = false;
+    };
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!editor.view.dom.contains(event.target as Node | null)) return;
+      if (event.pointerType === "mouse" && event.button !== 0) return;
+
+      pointerSelectingRef.current = true;
+      autoCommentSelectionRef.current = null;
+    };
+
+    const handlePointerDone = () => {
+      if (!pointerSelectingRef.current) return;
+
+      pointerSelectingRef.current = false;
+      requestAnimationFrame(() => {
+        updateLinkPopover();
+        maybeAddCommentForSelection();
+      });
+    };
+
+    const handleDoubleClick = () => {
+      pointerSelectingRef.current = false;
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          updateLinkPopover();
+          maybeAddCommentForSelection();
+        });
+      });
     };
 
     const handleSelectionChange = () => {
@@ -541,6 +431,10 @@ export function EditorContextMenu({
     editor.on("update", schedulePositionUpdate);
     editor.on("focus", schedulePositionUpdate);
     editor.on("blur", clearSelectionAction);
+    document.addEventListener("pointerdown", handlePointerDown, true);
+    document.addEventListener("pointerup", handlePointerDone, true);
+    document.addEventListener("pointercancel", handlePointerDone, true);
+    editor.view.dom.addEventListener("dblclick", handleDoubleClick);
     document.addEventListener("selectionchange", handleSelectionChange);
     document.addEventListener("keydown", handleKeyDown, true);
     window.addEventListener("resize", schedulePositionUpdate);
@@ -553,12 +447,16 @@ export function EditorContextMenu({
       editor.off("update", schedulePositionUpdate);
       editor.off("focus", schedulePositionUpdate);
       editor.off("blur", clearSelectionAction);
+      document.removeEventListener("pointerdown", handlePointerDown, true);
+      document.removeEventListener("pointerup", handlePointerDone, true);
+      document.removeEventListener("pointercancel", handlePointerDone, true);
+      editor.view.dom.removeEventListener("dblclick", handleDoubleClick);
       document.removeEventListener("selectionchange", handleSelectionChange);
       document.removeEventListener("keydown", handleKeyDown, true);
       window.removeEventListener("resize", schedulePositionUpdate);
       window.removeEventListener("scroll", schedulePositionUpdate, true);
     };
-  }, [editor, onAddComment, updateLinkPopover, updateSelectionActionPosition]);
+  }, [editor, maybeAddCommentForSelection, onAddComment, updateLinkPopover]);
 
   useEffect(() => {
     if (!linkPopoverState) return;
@@ -639,182 +537,6 @@ export function EditorContextMenu({
       }}
     >
       {children}
-      {selectionActionPosition && !linkPopoverState ? (
-        <div
-          data-testid="selection-menu"
-          className="absolute z-30 w-max max-w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-full rounded-[22px] border border-slate-200/90 dark:border-slate-700/90 bg-white/95 dark:bg-slate-800/95 p-2 shadow-[0_18px_48px_rgba(15,23,42,0.16)] dark:shadow-[0_18px_48px_rgba(0,0,0,0.4)] backdrop-blur-xl"
-          style={{
-            left: selectionActionPosition.left,
-            top: selectionActionPosition.top,
-          }}
-          onMouseDown={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-          }}
-        >
-          <div className="flex flex-wrap items-center gap-1">
-            <SelectionMenuButton
-              label="Bold"
-              icon={<Bold className="size-4" />}
-              active={selectionMenuState.isBoldActive}
-              disabled={!selectionMenuState.canToggleBold}
-              onClick={() => editor?.chain().focus().toggleBold().run()}
-            />
-            <SelectionMenuButton
-              label="Italic"
-              icon={<Italic className="size-4" />}
-              active={selectionMenuState.isItalicActive}
-              disabled={!selectionMenuState.canToggleItalic}
-              onClick={() => editor?.chain().focus().toggleItalic().run()}
-            />
-            <SelectionMenuButton
-              label="Inline code"
-              icon={<Code2 className="size-4" />}
-              active={selectionMenuState.isCodeActive}
-              disabled={!selectionMenuState.canToggleCode}
-              onClick={() => editor?.chain().focus().toggleCode().run()}
-            />
-            <SelectionMenuButton
-              label="Blockquote"
-              icon={<Quote className="size-4" />}
-              active={selectionMenuState.isBlockquoteActive}
-              disabled={!selectionMenuState.canToggleBlockquote}
-              onClick={() => editor?.chain().focus().toggleBlockquote().run()}
-            />
-            <SelectionMenuButton
-              label="Bulleted list"
-              icon={<List className="size-4" />}
-              active={selectionMenuState.isBulletListActive}
-              disabled={!selectionMenuState.canToggleBulletList}
-              onClick={() => editor?.chain().focus().toggleBulletList().run()}
-            />
-            <SelectionMenuButton
-              label="Numbered list"
-              icon={<ListOrdered className="size-4" />}
-              active={selectionMenuState.isOrderedListActive}
-              disabled={!selectionMenuState.canToggleOrderedList}
-              onClick={() => editor?.chain().focus().toggleOrderedList().run()}
-            />
-            <SelectionMenuButton
-              label="Link"
-              icon={<Link2 className="size-4" />}
-              active={selectionMenuState.isLinkActive}
-              onClick={openLinkPopover}
-            />
-            <SelectionMenuButton
-              label="Suggest insertion"
-              icon={<Plus className="size-4" />}
-              disabled={!onSuggestInsertion}
-              onClick={() => {
-                onSuggestInsertion?.();
-                setSelectionActionPosition(null);
-              }}
-            />
-            <SelectionMenuButton
-              label="Suggest deletion"
-              icon={<Minus className="size-4" />}
-              disabled={!onSuggestDeletion || editor?.state.selection.empty}
-              onClick={() => {
-                onSuggestDeletion?.();
-                setSelectionActionPosition(null);
-              }}
-            />
-            <SelectionMenuButton
-              label="Suggest replacement"
-              icon={<Replace className="size-4" />}
-              disabled={!onSuggestReplacement || editor?.state.selection.empty}
-              onClick={() => {
-                onSuggestReplacement?.();
-                setSelectionActionPosition(null);
-              }}
-            />
-          </div>
-          <div
-            className="my-2 h-px bg-slate-200/80 dark:bg-slate-700/80"
-            aria-hidden="true"
-          />
-          {selectionMenuState.activeCriticChangeId ? (
-            <>
-              <div className="grid grid-cols-2 gap-1">
-                <button
-                  type="button"
-                  data-testid="selection-menu-action-accept-suggestion"
-                  className="inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-medium text-emerald-700 transition hover:bg-emerald-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300"
-                  onMouseDown={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                  }}
-                  onClick={() => {
-                    if (selectionMenuState.activeCriticChangeId) {
-                      editor
-                        ?.chain()
-                        .focus()
-                        .acceptCriticChange(
-                          selectionMenuState.activeCriticChangeId,
-                        )
-                        .run();
-                    }
-                    setSelectionActionPosition(null);
-                  }}
-                >
-                  <Check className="size-4" />
-                  <span>Accept</span>
-                </button>
-                <button
-                  type="button"
-                  data-testid="selection-menu-action-reject-suggestion"
-                  className="inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-medium text-rose-700 transition hover:bg-rose-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-300"
-                  onMouseDown={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                  }}
-                  onClick={() => {
-                    if (selectionMenuState.activeCriticChangeId) {
-                      editor
-                        ?.chain()
-                        .focus()
-                        .rejectCriticChange(
-                          selectionMenuState.activeCriticChangeId,
-                        )
-                        .run();
-                    }
-                    setSelectionActionPosition(null);
-                  }}
-                >
-                  <X className="size-4" />
-                  <span>Reject</span>
-                </button>
-              </div>
-              <div
-                className="my-2 h-px bg-slate-200/80 dark:bg-slate-700/80"
-                aria-hidden="true"
-              />
-            </>
-          ) : null}
-          <button
-            type="button"
-            data-testid="selection-menu-action-comment"
-            className="flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-sm font-medium text-slate-700 dark:text-slate-300 transition hover:bg-slate-100 dark:hover:bg-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-300 dark:focus-visible:ring-slate-600"
-            disabled={!onAddComment || editor?.state.selection.empty}
-            onMouseDown={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-            }}
-            onClick={() => {
-              onAddComment?.();
-              setSelectionActionPosition(null);
-            }}
-          >
-            <span className="inline-flex items-center gap-2">
-              <MessageSquarePlus className="size-4.5" />
-              <span>Comment</span>
-            </span>
-            <span className="rounded-full border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-2.5 py-1 text-[11px] font-semibold tracking-[0.01em] text-slate-500 dark:text-slate-400">
-              {shortcutLabel}
-            </span>
-          </button>
-        </div>
-      ) : null}
       {linkPopoverState ? (
         <div
           ref={linkPopoverRef}

@@ -1,11 +1,9 @@
-import {
-  buildCommentThreads,
-  type CriticComment,
-  flattenCommentThreads,
-} from "./critic-markup";
+import type { CriticComment } from "./critic-markup";
 
 interface CommentAnchorMeasurement {
   commentIds: string[];
+  anchorLeft?: number;
+  anchorRight?: number;
   anchorTop: number;
   anchorBottom: number;
 }
@@ -13,6 +11,8 @@ interface CommentAnchorMeasurement {
 export interface CommentGroupAnchor {
   key: string;
   commentIds: string[];
+  anchorLeft?: number;
+  anchorRight?: number;
   anchorTop: number;
   anchorBottom: number;
 }
@@ -55,9 +55,17 @@ interface CommentAnchorElementLike {
     commentIds?: string;
   };
   getBoundingClientRect: () => {
+    left?: number;
+    right?: number;
     top: number;
     bottom: number;
   };
+  getClientRects?: () => Iterable<{
+    left: number;
+    right: number;
+    top: number;
+    bottom: number;
+  }>;
 }
 
 export function normalizeCommentMeasurement(
@@ -102,40 +110,45 @@ export function getPreferredCommentId(
   return commentIds[0] ?? null;
 }
 
+export function expandCommentIdsForLegacyReferences(
+  commentIds: string[],
+  comments: ReadonlyMap<string, CriticComment>,
+): string[] {
+  const visibleIds = new Set(
+    commentIds.filter((commentId) => comments.has(commentId)),
+  );
+  let changed = true;
+
+  while (changed) {
+    changed = false;
+
+    for (const comment of comments.values()) {
+      if (visibleIds.has(comment.id)) continue;
+      if (!comment.parentCommentId) continue;
+      if (!visibleIds.has(comment.parentCommentId)) continue;
+
+      visibleIds.add(comment.id);
+      changed = true;
+    }
+  }
+
+  return [...comments.values()]
+    .map((comment) => comment.id)
+    .filter((commentId) => visibleIds.has(commentId));
+}
+
 export function getRootThreadIdForCommentId(
   commentId: string | null,
   comments: ReadonlyMap<string, CriticComment>,
 ): string | null {
   if (!commentId) return null;
-
-  const visited = new Set<string>();
-  let currentComment = comments.get(commentId);
-
-  while (currentComment) {
-    if (visited.has(currentComment.id)) {
-      break;
-    }
-
-    visited.add(currentComment.id);
-    const parentCommentId = currentComment.parentCommentId;
-
-    if (
-      !parentCommentId ||
-      parentCommentId === currentComment.id ||
-      !comments.has(parentCommentId)
-    ) {
-      return currentComment.id;
-    }
-
-    currentComment = comments.get(parentCommentId);
-  }
-
   return comments.has(commentId) ? commentId : null;
 }
 
 export function getCommentAnchorMeasurements(
   anchorElements: Iterable<CommentAnchorElementLike>,
   containerTop: number,
+  containerLeft = 0,
   measurementScale = 1,
 ): CommentAnchorMeasurement[] {
   const measurements: CommentAnchorMeasurement[] = [];
@@ -145,8 +158,24 @@ export function getCommentAnchorMeasurements(
     if (commentIds.length === 0) continue;
 
     const rect = element.getBoundingClientRect();
+    const rects = [...(element.getClientRects?.() ?? [])];
+    const terminalRect = rects.at(-1) ?? rect;
     measurements.push({
       commentIds,
+      anchorLeft:
+        rect.left === undefined
+          ? undefined
+          : normalizeCommentMeasurement(
+              rect.left - containerLeft,
+              measurementScale,
+            ),
+      anchorRight:
+        terminalRect.right === undefined
+          ? undefined
+          : normalizeCommentMeasurement(
+              terminalRect.right - containerLeft,
+              measurementScale,
+            ),
       anchorTop: normalizeCommentMeasurement(
         rect.top - containerTop,
         measurementScale,
@@ -174,6 +203,8 @@ export function groupCommentAnchorMeasurements(
       grouped.set(key, {
         key,
         commentIds: measurement.commentIds,
+        anchorLeft: measurement.anchorLeft,
+        anchorRight: measurement.anchorRight,
         anchorTop: measurement.anchorTop,
         anchorBottom: measurement.anchorBottom,
       });
@@ -181,6 +212,13 @@ export function groupCommentAnchorMeasurements(
     }
 
     existing.anchorTop = Math.min(existing.anchorTop, measurement.anchorTop);
+    existing.anchorLeft =
+      existing.anchorLeft === undefined
+        ? measurement.anchorLeft
+        : measurement.anchorLeft === undefined
+          ? existing.anchorLeft
+          : Math.min(existing.anchorLeft, measurement.anchorLeft);
+    existing.anchorRight = measurement.anchorRight ?? existing.anchorRight;
     existing.anchorBottom = Math.max(
       existing.anchorBottom,
       measurement.anchorBottom,
@@ -199,26 +237,21 @@ export function buildCommentThreadRailItems(
   const items: CommentThreadRailItem[] = [];
 
   for (const group of groups) {
-    const visibleComments = group.commentIds
-      .map((commentId) => comments.get(commentId))
-      .filter((comment): comment is CriticComment => Boolean(comment));
+    const visibleCommentIds = expandCommentIdsForLegacyReferences(
+      group.commentIds,
+      comments,
+    );
 
-    if (visibleComments.length === 0) continue;
+    if (visibleCommentIds.length === 0) continue;
 
-    for (const thread of buildCommentThreads(visibleComments)) {
-      const threadComments = flattenCommentThreads([thread]);
-
-      if (threadComments.length === 0) continue;
-
-      items.push({
-        key: thread.comment.id,
-        anchorGroupKey: group.key,
-        rootCommentId: thread.comment.id,
-        commentIds: threadComments.map((comment) => comment.id),
-        anchorTop: group.anchorTop,
-        anchorBottom: group.anchorBottom,
-      });
-    }
+    items.push({
+      key: group.key,
+      anchorGroupKey: group.key,
+      rootCommentId: visibleCommentIds[0] ?? group.key,
+      commentIds: visibleCommentIds,
+      anchorTop: group.anchorTop,
+      anchorBottom: group.anchorBottom,
+    });
   }
 
   return items;

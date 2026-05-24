@@ -1,7 +1,8 @@
-import type { StorageBackend } from "./storage";
 import { ApiBackend } from "./api-backend";
 import { LocalStorageBackend } from "./local-storage-backend";
 import { RemoteBackend } from "./remote-backend";
+import type { StorageBackend } from "./storage";
+import { isTauriRuntime, TauriBackend } from "./tauri-backend";
 
 interface StatusPayload {
   backend?: string;
@@ -11,6 +12,10 @@ interface StatusPayload {
 }
 
 export async function detectBackend(): Promise<StorageBackend> {
+  if (isTauriRuntime()) {
+    return new TauriBackend();
+  }
+
   if (import.meta.env.VITE_PREVIEW_WEB === "1") {
     return new LocalStorageBackend();
   }

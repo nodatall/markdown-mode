@@ -308,7 +308,7 @@ test.describe("homepage workflow storyboard", () => {
     ).toContainText('This should go above "It\'s just Markdown."');
     await expect(
       roughdraftPopup.getByTestId("homepage-workflow-review-rail"),
-    ).toContainText("Sounds good. I'll move it above that section.");
+    ).not.toContainText("Sounds good.");
 
     const sceneLayout = await scenes.evaluateAll((elements) =>
       elements.map((element) => {

@@ -50,10 +50,6 @@ export function documentSaveStatus(page: Page) {
   return page.getByTestId("document-save-status");
 }
 
-export function fileConflictNotice(page: Page) {
-  return page.getByTestId("file-conflict-notice");
-}
-
 export async function appendInCodeEditor(page: Page, text: string) {
   const editor = codeEditor(page);
   await expect(editor).toBeVisible();
@@ -87,6 +83,92 @@ export async function selectRichText(page: Page, text: string) {
         selection?.removeAllRanges();
         selection?.addRange(range);
 
+        document.dispatchEvent(new Event("selectionchange", { bubbles: true }));
+        return;
+      }
+
+      node = walker.nextNode();
+    }
+
+    throw new Error(`Could not find text "${targetText}"`);
+  }, text);
+}
+
+export async function selectRichTextDuringPointerDrag(
+  page: Page,
+  text: string,
+) {
+  await richTextEditor(page).focus();
+  await page.evaluate((targetText) => {
+    const editor = document.querySelector(".ProseMirror");
+    if (!editor) {
+      throw new Error("Could not find rich-text editor");
+    }
+
+    editor.dispatchEvent(
+      new PointerEvent("pointerdown", {
+        bubbles: true,
+        cancelable: true,
+        button: 0,
+        pointerType: "mouse",
+      }),
+    );
+
+    const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT);
+    let node = walker.nextNode();
+
+    while (node) {
+      const index = node.textContent?.indexOf(targetText) ?? -1;
+
+      if (index >= 0) {
+        const range = document.createRange();
+        range.setStart(node, index);
+        range.setEnd(node, index + targetText.length);
+
+        const selection = window.getSelection();
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+
+        document.dispatchEvent(new Event("selectionchange", { bubbles: true }));
+        return;
+      }
+
+      node = walker.nextNode();
+    }
+
+    throw new Error(`Could not find text "${targetText}"`);
+  }, text);
+}
+
+export async function doubleClickRichText(page: Page, text: string) {
+  await richTextEditor(page).focus();
+  await page.evaluate((targetText) => {
+    const editor = document.querySelector(".ProseMirror");
+    if (!editor) {
+      throw new Error("Could not find rich-text editor");
+    }
+
+    const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT);
+    let node = walker.nextNode();
+
+    while (node) {
+      const index = node.textContent?.indexOf(targetText) ?? -1;
+
+      if (index >= 0) {
+        const range = document.createRange();
+        range.setStart(node, index);
+        range.setEnd(node, index + targetText.length);
+
+        const selection = window.getSelection();
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+
+        editor.dispatchEvent(
+          new MouseEvent("dblclick", {
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
         document.dispatchEvent(new Event("selectionchange", { bubbles: true }));
         return;
       }
