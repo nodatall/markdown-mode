@@ -1809,6 +1809,10 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
       const currentEditor = editorRef.current;
       if (!currentEditor) return;
 
+      const deletedComment = commentsRef.current.get(commentId);
+      const shouldCollapseAfterDelete =
+        deletedComment?.content.trim().length === 0;
+      const collapsePosition = currentEditor.state.selection.to;
       const commentIdsToDelete = [commentId];
       const deletedIds = new Set(commentIdsToDelete);
       const nextComments = new Map(commentsRef.current);
@@ -1818,11 +1822,22 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
       commentsRef.current = nextComments;
       setComments(nextComments);
 
-      const chain = currentEditor.chain().focus();
+      const chain = currentEditor.chain();
+      if (!shouldCollapseAfterDelete) {
+        chain.focus();
+      }
       for (const id of commentIdsToDelete) {
         chain.removeCommentId(id);
       }
+      if (shouldCollapseAfterDelete) {
+        // Empty draft cancellation should close the composer, not refocus the
+        // selected text and trigger a fresh auto-created comment.
+        chain.setTextSelection(collapsePosition);
+      }
       chain.run();
+      if (shouldCollapseAfterDelete) {
+        currentEditor.commands.blur();
+      }
       setSelectedCommentId((current) =>
         current && deletedIds.has(current) ? null : current,
       );

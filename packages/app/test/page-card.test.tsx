@@ -1333,6 +1333,47 @@ describe("PageCard editor integration", () => {
     expect(rendered.onSave).not.toHaveBeenCalled();
   });
 
+  it("closes an empty comment composer when cancel is pressed", async () => {
+    const rendered = await renderPageCard({
+      page: {
+        id: "doc-empty-comment-cancel",
+        title: "Doc Empty Comment Cancel",
+        content: "# Heading\n\nParagraph with **bold** text",
+      },
+      selected: true,
+    });
+
+    await selectText(rendered.getEditor(), "Paragraph");
+    await flushCommentLayout();
+    expect(
+      queryByTestId(rendered.container, "comment-rail-c1-editor"),
+    ).not.toBeNull();
+
+    const PointerEventCtor = window.PointerEvent ?? MouseEvent;
+    const cancelButton = getByTestId(
+      rendered.container,
+      "comment-rail-c1-action-cancel",
+    );
+    await act(async () => {
+      cancelButton.dispatchEvent(
+        new PointerEventCtor("pointerdown", {
+          bubbles: true,
+          cancelable: true,
+          button: 0,
+        }),
+      );
+    });
+
+    await flushCommentLayout();
+    expect(
+      queryByTestId(rendered.container, "comment-rail-c1-editor"),
+    ).toBeNull();
+    expect(
+      queryByTestId(rendered.container, "document-comment-marker-c1"),
+    ).toBeNull();
+    expect(rendered.onSave).not.toHaveBeenCalled();
+  });
+
   it("drag selection opens the comment composer after pointer release", async () => {
     const rendered = await renderPageCard({
       page: {
