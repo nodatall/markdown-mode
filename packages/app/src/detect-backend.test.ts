@@ -71,6 +71,33 @@ describe("detectBackend", () => {
     expect(createRemoteBackend).not.toHaveBeenCalled();
   });
 
+  it("keeps origin thread and auth token as API backend session metadata", async () => {
+    window.history.replaceState(
+      null,
+      "",
+      "/?path=/work/draft.md&originThreadId=thread-1&token=secret",
+    );
+    global.fetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            backend: "local-files",
+            projectDir: "/work",
+            capabilities: { agentCommentTasks: true },
+          }),
+          { status: 200 },
+        ),
+    ) as unknown as typeof fetch;
+
+    const backend = await detectBackend();
+
+    expect(backend).toBeInstanceOf(ApiBackend);
+    expect(backend.info).toMatchObject({
+      originThreadId: "thread-1",
+      authToken: "secret",
+    });
+  });
+
   it("does not hide a broken remote session by falling back to local storage", async () => {
     window.history.replaceState(null, "", "/?session=missing&token=bad");
     global.fetch = vi.fn(

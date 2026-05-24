@@ -135,7 +135,7 @@ worktree_root="$(git rev-parse --show-toplevel)"
 worktree_name="$(basename "$worktree_root")"
 roughdraft_cmd="roughdraft-dev-$worktree_name"
 "$roughdraft_cmd" start
-"$roughdraft_cmd" open "$worktree_root/.context/<plan-file>.md"
+"$roughdraft_cmd" open "$worktree_root/.context/<plan-file>.md" --watch
 ```
 
 After the user finishes reviewing in Roughdraft, read the plan file from disk and address any CriticMarkup feedback before implementing.
@@ -161,7 +161,9 @@ Preferred flow:
 "$roughdraft_cmd" open "/absolute/path/to/file.md"
 ```
 
-4. After the user finishes reviewing in Roughdraft, read the markdown file from disk and make the requested changes there.
+4. Treat submitted Roughdraft comments as individual work requests. Read the markdown file from disk and make the requested changes for the specific CriticMarkup item.
+
+Use `--watch` only when you explicitly need the legacy blocking review-event flow.
 
 Useful commands:
 

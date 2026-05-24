@@ -1,7 +1,7 @@
 # Roughdraft
 A local-first markdown editor and viewer for working with AI.
 
-{==Open one markdown file on your machine. Review it, comment on it, and suggest edits.==}{>>What does this mean?<<}{id="c3" by="user" at="2026-04-30T20:18:51.163Z"}{>>It means Roughdraft works with a normal local Markdown file: you open one .md file from your computer, read it in the app, leave inline comments, and propose edits that are saved back into the Markdown using CriticMarkup.<<}{id="c4" by="AI" at="2026-04-30T20:19:39.000Z" re="c3"}{>>cjool<<}{id="c5" by="user" at="2026-05-07T20:38:25.621Z" re="c4"}
+{==Open one markdown file on your machine. Review it, comment on it, and suggest edits.==}{>>What does this mean?<<}{id="c1" by="user" at="2026-04-30T20:18:51.163Z"}
 
 Paste this into your coding agent:
 
@@ -82,16 +82,25 @@ That makes an agent-friendly workflow possible:
   
 4. You read, edit, leave comments, and suggest changes.
   
-5. You click **Done Reviewing** in Roughdraft, and the AI can respond to your comments or revise the document.
+5. When you submit a comment, Roughdraft saves that comment and sends that specific request to the configured agent workflow. If no agent adapter is available, use the copy-prompt button to paste the feedback into an agent yourself.
   
 
-Agents can watch that handoff directly:
+The normal open command returns after opening the file:
 
 ```bash
 roughdraft open ./path/to/my-essay/draft.md --json
 ```
 
-`roughdraft open` starts or reuses the local server, opens the document, registers a fresh watcher, blocks until the next `review.completed` event, then prints event JSON with the document path, file version, and feedback counts. By default there is no watch timeout; pass `--timeout <seconds>` when you want one. Use `--no-watch` when you only want to open the document and return immediately. If no watcher is active when you click **Done Reviewing**, Roughdraft shows a fallback prompt you can copy into the agent.
+`roughdraft open` starts or reuses the local server, opens the document, and returns control to the caller. If `CODEX_THREAD_ID` is present, Roughdraft passes it as transient session context so submitted comments can be associated with that origin thread. Use `--detached` to ignore that environment value, or `--origin-thread-id <id>` to pass one explicitly.
+
+The old blocking review-event flow remains available for compatibility:
+
+```bash
+roughdraft open ./path/to/my-essay/draft.md --watch --json
+roughdraft watch ./path/to/my-essay/draft.md --json
+```
+
+`--watch` waits for a legacy `review.completed` event. New agent-comment task endpoints are the primary product path.
 
 Experimental MCP clients can start the stdio server with:
 
@@ -99,7 +108,7 @@ Experimental MCP clients can start the stdio server with:
 roughdraft mcp
 ```
 
-The MCP server exposes tools to read the review index, list pending feedback, watch review events, append replies, and mark items resolved. CriticMarkup in the Markdown file remains the durable source of truth.
+The MCP server exposes tools to read the review index, list pending feedback, watch review events, use legacy reply helpers, and mark items resolved. CriticMarkup in the Markdown file remains the durable source of truth.
 ## Local development
 ```bash
 ./scripts/setup.sh
@@ -178,7 +187,7 @@ roughdraft <path>
 Commands:
 
 ```text
-open <path>        Open one Markdown file and wait for Done Reviewing
+open <path>        Open one Markdown file
 start              Start or reuse the background server
 status             Show server status
 stop               Stop the managed background server
@@ -206,7 +215,9 @@ Useful command flags:
 roughdraft open <path> --no-open
 roughdraft open <path> --print-url
 roughdraft open <path> --json
-roughdraft open <path> --no-watch
+roughdraft open <path> --watch
+roughdraft open <path> --detached
+roughdraft open <path> --origin-thread-id <id>
 roughdraft start --port <port>
 roughdraft status --json
 roughdraft stop --all
@@ -274,19 +285,10 @@ Supported attributes:
   
 - `at` records an ISO timestamp.
   
-- `re` links a reply to another comment or suggestion id.
-  
-
-Replies are stored as additional comment blocks that point at the parent id:
+Suggested changes can also carry ids:
 
 ```markdown
-Please revisit {==this sentence==}{>>Needs a source<<}{id="c1" by="user" at="2026-04-28T12:00:00.000Z"}{>>I can add one from the intro.<<}{id="c2" by="AI" at="2026-04-28T12:05:00.000Z" re="c1"}.
-```
-
-Suggested changes can also carry ids and discussion:
-
-```markdown
-Add {++one concrete example++}{id="s1" by="AI" at="2026-04-28T12:10:00.000Z"}{>>Use the customer story here.<<}{id="c3" by="user" at="2026-04-28T12:12:00.000Z" re="s1"}.
+Add {++one concrete example++}{id="s1" by="AI" at="2026-04-28T12:10:00.000Z"}.
 Remove {--vague phrasing--}{id="s2" by="user" at="2026-04-28T12:13:00.000Z"}.
 Use {~~rough~>specific~~}{id="s3" by="AI" at="2026-04-28T12:14:00.000Z"} wording.
 ```

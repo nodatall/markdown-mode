@@ -7,6 +7,12 @@ import path from "node:path";
 import fs from "node:fs";
 import { extractRoughdraftReviewIndex } from "@roughdraft/rfm";
 import {
+  type AgentCommentAdapter,
+  AgentCommentTaskService,
+  FakeAgentCommentAdapter,
+  reviewItemToAgentCommentInput,
+} from "./agent-comment-tasks.js";
+import {
   ROUGHDRAFT_DEFAULT_PORT,
   ROUGHDRAFT_PUBLIC_HOST,
   hasNonLoopbackHost,
@@ -64,6 +70,7 @@ interface CreateAppOptions {
   fetchImpl?: typeof fetch;
   packageName?: string;
   remoteDocumentToken?: string;
+  agentCommentAdapter?: AgentCommentAdapter;
 }
 
 interface CreateAppResult {
@@ -396,9 +403,20 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
   const app = express();
   const openRequestClients = new Set<OpenRequestClient>();
   const reviewEvents = new ReviewEventQueue();
+  const agentCommentAdapter =
+    options.agentCommentAdapter ??
+    (process.env.ROUGHDRAFT_AGENT_ADAPTER === "fake"
+      ? new FakeAgentCommentAdapter()
+      : undefined);
+  const agentCommentTasks = new AgentCommentTaskService({
+    adapter: agentCommentAdapter,
+  });
   const remoteSessions = new Map<string, RemoteSession>();
 
-  function isAuthorizedRemoteDocumentRequest(req: Request): boolean {
+  function isAuthorizedTokenRequest(
+    req: Request,
+    options?: { acceptsQueryToken?: boolean },
+  ): boolean {
     if (!remoteDocumentToken) return true;
 
     const header =
@@ -410,10 +428,7 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
       if (supplied === remoteDocumentToken) return true;
     }
 
-    const acceptsQueryToken =
-      req.method === "GET" &&
-      req.path.startsWith("/api/remote-document/") &&
-      req.path.endsWith("/events");
+    const acceptsQueryToken = options?.acceptsQueryToken === true;
     const queryToken =
       acceptsQueryToken && typeof req.query.token === "string"
         ? req.query.token
@@ -421,10 +436,19 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
     return queryToken === remoteDocumentToken;
   }
 
-  function rejectUnauthorizedRemoteDocumentRequest(res: Response): void {
+  function isAuthorizedRemoteDocumentRequest(req: Request): boolean {
+    return isAuthorizedTokenRequest(req, {
+      acceptsQueryToken:
+        req.method === "GET" &&
+        req.path.startsWith("/api/remote-document/") &&
+        req.path.endsWith("/events"),
+    });
+  }
+
+  function rejectUnauthorizedTokenRequest(res: Response): void {
     res.status(401).json({
       error:
-        "Remote document endpoints require a valid token. Set ROUGHDRAFT_TOKEN on the client; browser event streams may include ?token=... in the URL.",
+        "This endpoint requires a valid token. Set ROUGHDRAFT_TOKEN on the client; browser event streams may include ?token=... in the URL.",
     });
   }
 
@@ -643,6 +667,104 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
     res.status(201).json(result);
   });
 
+  app.get("/api/agent-comment-session", (req, res) => {
+    if (!isAuthorizedTokenRequest(req)) {
+      rejectUnauthorizedTokenRequest(res);
+      return;
+    }
+
+    const target = markdownPathFromRequest(req, res);
+    if (!target) return;
+
+    const originThreadId =
+      typeof req.query.originThreadId === "string"
+        ? req.query.originThreadId
+        : null;
+
+    res.json(
+      agentCommentTasks.getSession({
+        documentPath: target.absolutePath,
+        projectPath: target.projectDir,
+        relativePath: target.relativePath,
+        originThreadId,
+      }),
+    );
+  });
+
+  app.post("/api/agent-comment-tasks", async (req, res) => {
+    if (!isAuthorizedTokenRequest(req)) {
+      rejectUnauthorizedTokenRequest(res);
+      return;
+    }
+
+    const target = markdownPathFromRequest(req, res);
+    if (!target) return;
+
+    const commentId =
+      typeof req.body?.commentId === "string" ? req.body.commentId.trim() : "";
+    if (!commentId) {
+      res.status(400).json({ error: "commentId is required" });
+      return;
+    }
+
+    const currentVersion = fileVersionFromFile(target.absolutePath);
+    const expectedVersion =
+      typeof req.body?.expectedVersion === "string"
+        ? req.body.expectedVersion
+        : "";
+    if (expectedVersion && expectedVersion !== currentVersion) {
+      res.status(409).json({
+        error: "Markdown file changed on disk",
+        current: markdownPageFromFile(target.relativePath, target.absolutePath),
+      });
+      return;
+    }
+
+    const markdown = fs.readFileSync(target.absolutePath, "utf-8");
+    const index = extractRoughdraftReviewIndex(markdown);
+    const item = index.items.find(
+      (candidate) => candidate.id === commentId && candidate.kind === "comment",
+    );
+    if (!item) {
+      res.status(404).json({ error: "Comment not found" });
+      return;
+    }
+
+    const originThreadId =
+      typeof req.body?.originThreadId === "string"
+        ? req.body.originThreadId.trim()
+        : null;
+    const mode = originThreadId ? "attached" : "detached";
+    const task = await agentCommentTasks.submit(
+      reviewItemToAgentCommentInput({
+        documentPath: target.absolutePath,
+        projectPath: target.projectDir,
+        relativePath: target.relativePath,
+        fileVersion: currentVersion,
+        mode,
+        originThreadId,
+        item,
+      }),
+    );
+
+    const statusCode = task.status === "needs_attention" ? 202 : 201;
+    res.status(statusCode).json({ task });
+  });
+
+  app.get("/api/agent-comment-tasks/:id", (req, res) => {
+    if (!isAuthorizedTokenRequest(req)) {
+      rejectUnauthorizedTokenRequest(res);
+      return;
+    }
+
+    const task = agentCommentTasks.getTask(req.params.id);
+    if (!task) {
+      res.status(404).json({ error: "Agent comment task not found" });
+      return;
+    }
+    res.json({ task });
+  });
+
   app.post("/api/review-events/watch", async (req, res) => {
     const target = markdownPathFromRequest(req, res);
     if (!target) return;
@@ -783,6 +905,8 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
         fileSystemBrowsing: true,
         remoteDocuments: true,
         remoteDocumentTokenRequired: remoteDocumentToken !== null,
+        agentCommentTasks: true,
+        agentCommentAdapter: agentCommentTasks.capability(),
       },
     });
   });
@@ -854,7 +978,7 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
 
   app.post("/api/remote-document", (req, res) => {
     if (!isAuthorizedRemoteDocumentRequest(req)) {
-      rejectUnauthorizedRemoteDocumentRequest(res);
+      rejectUnauthorizedTokenRequest(res);
       return;
     }
     const payload = req.body as RemoteDocumentRegisterPayload;
@@ -909,7 +1033,7 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
 
   app.get("/api/remote-document/:id", (req, res) => {
     if (!isAuthorizedRemoteDocumentRequest(req)) {
-      rejectUnauthorizedRemoteDocumentRequest(res);
+      rejectUnauthorizedTokenRequest(res);
       return;
     }
     const session = remoteSessions.get(req.params.id);
@@ -922,7 +1046,7 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
 
   app.put("/api/remote-document/:id", (req, res) => {
     if (!isAuthorizedRemoteDocumentRequest(req)) {
-      rejectUnauthorizedRemoteDocumentRequest(res);
+      rejectUnauthorizedTokenRequest(res);
       return;
     }
     const session = remoteSessions.get(req.params.id);
@@ -983,7 +1107,7 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
 
   app.get("/api/remote-document/:id/events", (req, res) => {
     if (!isAuthorizedRemoteDocumentRequest(req)) {
-      rejectUnauthorizedRemoteDocumentRequest(res);
+      rejectUnauthorizedTokenRequest(res);
       return;
     }
     const session = remoteSessions.get(req.params.id);

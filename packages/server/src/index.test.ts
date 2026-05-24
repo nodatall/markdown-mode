@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import request from "supertest";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { FakeAgentCommentAdapter } from "./agent-comment-tasks";
 import { createApp } from "./index";
 
 describe("createApp", () => {
@@ -387,6 +388,128 @@ describe("createApp", () => {
     await waitingPromise;
   });
 
+  it("reports detached agent-comment session capability", async () => {
+    fs.writeFileSync(path.join(projectDir, "draft.md"), "# Draft\n");
+    const { app } = createApp({
+      homeDir,
+      staticDirPath: projectDir,
+      agentCommentAdapter: new FakeAgentCommentAdapter(),
+    });
+
+    const response = await request(app)
+      .get("/api/agent-comment-session")
+      .query({ projectPath: projectDir, path: "draft.md" });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      documentPath: path.join(projectDir, "draft.md"),
+      projectPath: projectDir,
+      relativePath: "draft.md",
+      mode: "detached",
+      originThreadId: null,
+      adapter: {
+        available: true,
+        name: "fake",
+        supportsAttached: true,
+        supportsDetached: true,
+      },
+    });
+  });
+
+  it("reports attached agent-comment sessions from transient origin metadata", async () => {
+    fs.writeFileSync(path.join(projectDir, "draft.md"), "# Draft\n");
+    const { app } = createApp({
+      homeDir,
+      staticDirPath: projectDir,
+      agentCommentAdapter: new FakeAgentCommentAdapter(),
+    });
+
+    const response = await request(app)
+      .get("/api/agent-comment-session")
+      .query({
+        projectPath: projectDir,
+        path: "draft.md",
+        originThreadId: "thread-1",
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      mode: "attached",
+      originThreadId: "thread-1",
+    });
+  });
+
+  it("submits one comment task with comment text and anchor reference", async () => {
+    fs.writeFileSync(
+      path.join(projectDir, "draft.md"),
+      [
+        "# Draft",
+        "",
+        'Needs {==support==}{>>Add a source<<}{id="c1" by="user" at="2026-04-28T12:00:00.000Z"}.',
+        'Also {==tone==}{>>Make this warmer<<}{id="c2" by="user" at="2026-04-28T12:01:00.000Z"}.',
+      ].join("\n"),
+    );
+    const { app } = createApp({
+      homeDir,
+      staticDirPath: projectDir,
+      agentCommentAdapter: new FakeAgentCommentAdapter(),
+    });
+
+    const response = await request(app).post("/api/agent-comment-tasks").send({
+      projectPath: projectDir,
+      path: "draft.md",
+      commentId: "c1",
+      originThreadId: "thread-1",
+    });
+
+    expect(response.status).toBe(201);
+    expect(response.body.task).toMatchObject({
+      status: "working",
+      adapterName: "fake",
+      mode: "attached",
+      originThreadId: "thread-1",
+      comment: {
+        id: "c1",
+        text: "Add a source",
+        anchorText: "support",
+      },
+    });
+    expect(response.body.task.prompt).toContain("Comment id: c1");
+    expect(response.body.task.prompt).toContain("Origin thread id: thread-1");
+    expect(response.body.task.prompt).toContain("Reference: support");
+    expect(response.body.task.prompt).not.toContain("Make this warmer");
+  });
+
+  it("keeps agent-comment task submission behind the configured token", async () => {
+    fs.writeFileSync(
+      path.join(projectDir, "draft.md"),
+      'Needs {==support==}{>>Add a source<<}{id="c1" by="user" at="2026-04-28T12:00:00.000Z"}.\n',
+    );
+    const { app } = createApp({
+      homeDir,
+      staticDirPath: projectDir,
+      remoteDocumentToken: "secret-token",
+      agentCommentAdapter: new FakeAgentCommentAdapter(),
+    });
+
+    const noToken = await request(app).post("/api/agent-comment-tasks").send({
+      projectPath: projectDir,
+      path: "draft.md",
+      commentId: "c1",
+    });
+    expect(noToken.status).toBe(401);
+
+    const ok = await request(app)
+      .post("/api/agent-comment-tasks")
+      .set("Authorization", "Bearer secret-token")
+      .send({
+        projectPath: projectDir,
+        path: "draft.md",
+        commentId: "c1",
+      });
+    expect(ok.status).toBe(201);
+  });
+
   it("rejects page ids that resolve outside the project directory", async () => {
     const outsideName = `${path.basename(projectDir)}-secret`;
     const outsideFilePath = path.join(
@@ -460,6 +583,15 @@ describe("createApp", () => {
         fileSystemBrowsing: true,
         remoteDocuments: true,
         remoteDocumentTokenRequired: false,
+        agentCommentTasks: true,
+        agentCommentAdapter: {
+          available: false,
+          name: "unavailable",
+          reason:
+            "No verified Codex App Server adapter is configured. Use the copy prompt fallback or configure a real adapter.",
+          supportsAttached: false,
+          supportsDetached: false,
+        },
       },
     });
     expect(response.body).not.toHaveProperty("projectDir");

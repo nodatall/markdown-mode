@@ -1411,12 +1411,6 @@ export function PreviewPage() {
     [backend],
   );
 
-  const handleCompletePreviewReview = useCallback(async () => {
-    return backend.completeReview
-      ? backend.completeReview(PREVIEW_DOCUMENT_PATH)
-      : { delivered: false };
-  }, [backend]);
-
   return (
     <main className="dark relative flex h-screen min-w-0 flex-col overflow-hidden bg-[#121413] text-slate-50">
       <DocumentWorkspace
@@ -1430,7 +1424,6 @@ export function PreviewPage() {
         onDocumentLocalContentChange={() => {}}
         documentDiskChangeState="clean"
         documentForceResetKey={null}
-        onCompleteReview={handleCompletePreviewReview}
         backend={backend}
       />
     </main>
@@ -1818,40 +1811,6 @@ export function App() {
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, [documentDiskChangeState]);
 
-  const handleCompleteReview = useCallback(async () => {
-    const currentBackend = backendRef.current;
-    const currentPath = activeDocumentPathRef.current;
-    const currentDocument = documentPageRef.current;
-    if (!currentBackend || !currentPath || !currentDocument) {
-      return { delivered: false };
-    }
-
-    const content = documentDraftContentRef.current ?? currentDocument.content;
-    const expectedVersion = currentDocument.version;
-    const firstLine = content.split("\n")[0] || "";
-    const fallbackTitle =
-      currentDocument.id.split("/").at(-1) || currentDocument.id;
-    const title = firstLine.replace(/^#*\s*/, "") || fallbackTitle;
-
-    const savedDocument = (await currentBackend.saveMarkdownFile(
-      currentPath,
-      content,
-      expectedVersion,
-    )) ?? {
-      ...currentDocument,
-      content,
-      title,
-    };
-
-    applyDocumentPage(savedDocument);
-    documentDirtyRef.current = false;
-    setDocumentDiskChangeState("clean");
-
-    return currentBackend.completeReview
-      ? currentBackend.completeReview(currentPath)
-      : { delivered: false };
-  }, [applyDocumentPage]);
-
   useEffect(() => {
     if (!backend?.watchMarkdownFile || !activeDocumentPath) return;
 
@@ -1946,7 +1905,6 @@ export function App() {
         onDocumentLocalContentChange={handleDocumentLocalContentChange}
         documentDiskChangeState={documentDiskChangeState}
         documentForceResetKey={documentForceResetKey}
-        onCompleteReview={handleCompleteReview}
         backend={backend}
       />
     </main>

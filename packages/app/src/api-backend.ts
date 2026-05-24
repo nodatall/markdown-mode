@@ -1,5 +1,6 @@
 import {
   MarkdownFileConflictError,
+  type AgentCommentSession,
   type BackendInfo,
   type CompleteReviewResult,
   type MarkdownFileChangeEvent,
@@ -7,6 +8,8 @@ import {
   type ReviewWatchStatus,
   type StorageBackend,
   type StoredAsset,
+  type SubmitAgentCommentTaskOptions,
+  type SubmitAgentCommentTaskResult,
 } from "./storage";
 
 export class ApiBackend implements StorageBackend {
@@ -33,11 +36,21 @@ export class ApiBackend implements StorageBackend {
       url.searchParams.set("projectPath", projectPath);
     }
 
+    const originThreadId = this.info.originThreadId?.trim();
+    if (originThreadId) {
+      url.searchParams.set("originThreadId", originThreadId);
+    }
+
     Object.entries(params ?? {}).forEach(([key, value]) => {
       url.searchParams.set(key, value);
     });
 
     return `${url.pathname}${url.search}`;
+  }
+
+  private authHeaders(): Record<string, string> {
+    const token = this.info.authToken?.trim();
+    return token ? { Authorization: `Bearer ${token}` } : {};
   }
 
   async getMarkdownFile(relativePath: string): Promise<Page> {
@@ -63,7 +76,7 @@ export class ApiBackend implements StorageBackend {
       this.buildUrl("/api/markdown-file", { path: relativePath }),
       {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...this.authHeaders() },
         body: JSON.stringify({
           content,
           expectedVersion,
@@ -115,7 +128,7 @@ export class ApiBackend implements StorageBackend {
       this.buildUrl("/api/review-events", { path: relativePath }),
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...this.authHeaders() },
         body: JSON.stringify({
           projectPath: this.info.projectPath,
           path: relativePath,
@@ -155,6 +168,69 @@ export class ApiBackend implements StorageBackend {
     };
   }
 
+  async getAgentCommentSession(
+    relativePath: string,
+  ): Promise<AgentCommentSession> {
+    const res = await fetch(
+      this.buildUrl("/api/agent-comment-session", { path: relativePath }),
+      { headers: this.authHeaders() },
+    );
+
+    if (!res.ok) {
+      throw new Error(
+        `Failed to get agent comment session ${relativePath}: ${res.status}`,
+      );
+    }
+
+    return res.json();
+  }
+
+  async submitAgentCommentTask(
+    relativePath: string,
+    options: SubmitAgentCommentTaskOptions,
+  ): Promise<SubmitAgentCommentTaskResult> {
+    const res = await fetch(
+      this.buildUrl("/api/agent-comment-tasks", { path: relativePath }),
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...this.authHeaders() },
+        body: JSON.stringify({
+          projectPath: this.info.projectPath,
+          path: relativePath,
+          originThreadId: this.info.originThreadId,
+          ...options,
+        }),
+      },
+    );
+
+    if (!res.ok) {
+      throw new Error(
+        `Failed to submit agent comment task ${relativePath}: ${res.status}`,
+      );
+    }
+
+    return res.json();
+  }
+
+  async getAgentCommentTask(
+    taskId: string,
+  ): Promise<SubmitAgentCommentTaskResult> {
+    const res = await fetch(
+      this.buildUrl(`/api/agent-comment-tasks/${taskId}`),
+      {
+        headers: this.authHeaders(),
+      },
+    );
+
+    if (!res.ok) {
+      throw new Error(
+        `Failed to get agent comment task ${taskId}: ${res.status}`,
+      );
+    }
+
+    return res.json();
+  }
+
   async saveAsset(file: File): Promise<StoredAsset> {
     const buffer = await file.arrayBuffer();
     let binary = "";
@@ -167,7 +243,7 @@ export class ApiBackend implements StorageBackend {
 
     const res = await fetch(this.buildUrl("/api/assets"), {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...this.authHeaders() },
       body: JSON.stringify({
         filename: file.name,
         mimeType: file.type || "application/octet-stream",

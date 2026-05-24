@@ -145,8 +145,10 @@ interface ParsedCommandOptions {
   batchWindowSeconds: number;
   help: boolean;
   json: boolean;
+  detached: boolean;
   noOpen: boolean;
   noWatch: boolean;
+  originThreadId?: string;
   printUrl: boolean;
   port?: string;
   replay: boolean;
@@ -271,6 +273,7 @@ function parseCommandOptions(
   const parsed: ParsedCommandOptions = {
     all: false,
     batchWindowSeconds: 0.25,
+    detached: false,
     help: false,
     json: false,
     noOpen: false,
@@ -327,6 +330,28 @@ function parseCommandOptions(
     if (arg === "--no-watch") {
       if (!options.allowWatch) throw new Error(`Unknown flag: ${arg}`);
       parsed.noWatch = true;
+      continue;
+    }
+
+    if (arg === "--detached") {
+      if (!options.allowOpen) throw new Error(`Unknown flag: ${arg}`);
+      parsed.detached = true;
+      continue;
+    }
+
+    if (arg === "--origin-thread-id") {
+      if (!options.allowOpen) throw new Error(`Unknown flag: ${arg}`);
+      const next = takeFlagValue(args, index, arg);
+      parsed.originThreadId = next.value;
+      index = next.nextIndex;
+      continue;
+    }
+
+    if (arg.startsWith("--origin-thread-id=")) {
+      if (!options.allowOpen) {
+        throw new Error("Unknown flag: --origin-thread-id");
+      }
+      parsed.originThreadId = arg.slice("--origin-thread-id=".length);
       continue;
     }
 
@@ -765,7 +790,7 @@ function printHelp(log: (message: string) => void) {
   log("  roughdraft <path>");
   log("");
   log("Commands:");
-  log("  open <path>        Open a Markdown file and wait for Done Reviewing");
+  log("  open <path>        Open one Markdown file");
   log("  start              Start or reuse the background server");
   log("  status             Show server status");
   log("  stop               Stop the managed background server");
@@ -787,7 +812,7 @@ function printHelp(log: (message: string) => void) {
   log("  roughdraft open ./draft.md");
   log("  roughdraft open ./draft.md --print-url");
   log("  roughdraft open ./draft.md --json");
-  log("  roughdraft open ./draft.md --no-watch");
+  log("  roughdraft open ./draft.md --watch");
   log("  roughdraft watch ./draft.md --json");
   log("  roughdraft status --json");
   log("");
@@ -802,12 +827,10 @@ function printCommandHelp(
   if (command === "open") {
     log("Usage:");
     log(
-      "  roughdraft open <path> [--no-open] [--no-watch] [--print-url] [--port <port>]",
+      "  roughdraft open <path> [--no-open] [--watch] [--print-url] [--port <port>]",
     );
     log("");
-    log(
-      "Opens one Markdown file and waits for Done Reviewing. Starts Roughdraft if needed.",
-    );
+    log("Opens one Markdown file. Starts Roughdraft if needed.");
     log("");
     log("Flags:");
     log(
@@ -816,7 +839,11 @@ function printCommandHelp(
     log(
       "  --print-url          Print only the document URL and do not open it",
     );
-    log("  --no-watch           Open the file without waiting");
+    log("  --watch              Wait for the legacy Done Reviewing event");
+    log("  --no-watch           Compatibility no-op; open returns by default");
+    log("  --origin-thread-id <id>");
+    log("                       Attach transient agent thread metadata");
+    log("  --detached           Ignore CODEX_THREAD_ID for this open");
     log("  --timeout <seconds>  Maximum watch time; omitted means no timeout");
     log("  --replay             Allow watch to return retained older events");
     log("  --json               Print machine-readable output");
@@ -838,6 +865,8 @@ function printCommandHelp(
     log("                        non-loopback host. Must match the value the");
     log("                        hosted server was started with.");
     log("  ROUGHDRAFT_NO_OPEN    Set to 1 to suppress browser launch.");
+    log("  CODEX_THREAD_ID       Attached to the opened document unless");
+    log("                        --detached is passed.");
     log("  ROUGHDRAFT_BIND_HOST  Comma-separated bind hosts for the hosted");
     log(
       "                        server (default: loopback). Set to 0.0.0.0 or",
@@ -997,13 +1026,8 @@ function printCriticMarkupHelp(log: (message: string) => void) {
     '  Replace {~~vague phrasing~>specific wording~~}{id="s2" by="AI" at="2026-04-28T12:06:00.000Z"}.',
   );
   log("");
-  log("Reply to an existing comment:");
-  log(
-    '  Review {==this sentence==}{>>Needs a source<<}{id="c1" by="AI" at="2026-04-28T12:00:00.000Z"}{>>I can add one from the intro.<<}{id="c2" by="AI" at="2026-04-28T12:10:00.000Z" re="c1"}.',
-  );
-  log("");
-  log("Reply guidance:");
-  log('  Use explicit `id="..."` and `re="..."` metadata for replies.');
+  log("Comment guidance:");
+  log("  Add new feedback as a root comment or suggested change.");
   log(
     "  Comment ids are document-local and usually look like `c1`, `c2`, `c3`.",
   );
@@ -1048,12 +1072,33 @@ function buildLoopbackUrl(host: string, port: number, pathname = "/"): URL {
   return new URL(`http://${baseHost}:${port}${pathname}`);
 }
 
-function buildTargetUrl(baseUrl: string, openPath: string): string {
+function buildTargetUrl(
+  baseUrl: string,
+  openPath: string,
+  options?: { originThreadId?: string | null },
+): string {
   const url = new URL(baseUrl);
 
   url.pathname = "/";
   url.searchParams.set("path", openPath);
+  if (options?.originThreadId) {
+    url.searchParams.set("originThreadId", options.originThreadId);
+  }
   return url.toString();
+}
+
+function originThreadIdForOpen(
+  env: NodeJS.ProcessEnv,
+  options: Pick<ParsedCommandOptions, "detached" | "originThreadId">,
+): string | null {
+  if (options.detached) return null;
+
+  const explicit = options.originThreadId?.trim();
+  if (explicit) return explicit;
+
+  const envThreadId =
+    typeof env.CODEX_THREAD_ID === "string" ? env.CODEX_THREAD_ID.trim() : "";
+  return envThreadId.length > 0 ? envThreadId : null;
 }
 
 interface SseEvent {
@@ -2645,7 +2690,8 @@ export async function runCli(
         baseUrl = buildPublicBaseUrl(result.server.port);
       }
 
-      const targetUrl = buildTargetUrl(baseUrl, openPath);
+      const originThreadId = originThreadIdForOpen(deps.env, options);
+      const targetUrl = buildTargetUrl(baseUrl, openPath, { originThreadId });
       let openMode: OpenMode = "disabled";
       if (!options.noOpen && deps.env.ROUGHDRAFT_NO_OPEN !== "1") {
         openMode = (await sendOpenRequestToExistingWindow(
@@ -2672,7 +2718,7 @@ export async function runCli(
         return 0;
       }
 
-      const shouldWatch = !options.noWatch && !options.printUrl;
+      const shouldWatch = options.watch && !options.printUrl;
 
       if (shouldWatch) {
         if (!json) {
@@ -2709,6 +2755,7 @@ export async function runCli(
           url: targetUrl,
           serverUrl: baseUrl,
           path: openPath,
+          originThreadId,
           openMode,
         });
         return 0;

@@ -163,7 +163,7 @@ test.describe("CriticMarkup review flows", () => {
     });
   });
 
-  test("submitting a comment notifies the waiting agent without Done Reviewing @smoke", async ({
+  test("submitting a comment starts an agent task without Done Reviewing @smoke", async ({
     page,
   }) => {
     const filePath = writeProjectFile(
@@ -178,28 +178,10 @@ test.describe("CriticMarkup review flows", () => {
     );
 
     await openMarkdownFile(page, filePath);
-    const watchPromise = page.evaluate(
-      async ({ projectPath, relativePath }) => {
-        const response = await fetch("/api/review-events/watch", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            projectPath,
-            path: relativePath,
-            fromNow: true,
-            timeoutSeconds: 8,
-            batchWindowSeconds: 0,
-          }),
-        });
-        return response.json() as Promise<{
-          events?: Array<{ relativePath?: string }>;
-          timedOut?: boolean;
-        }>;
-      },
-      { projectPath: projectDir, relativePath: "auto-handoff.md" },
+    await expect(page.getByTestId("review-handoff-button")).toHaveCount(0);
+    await expect(page.getByTestId("agent-comment-inline-status")).toContainText(
+      "Detached agent ready",
     );
-
-    await expect(page.getByTestId("review-handoff-button")).toBeVisible();
     await selectRichText(page, "target text");
     await page.getByTestId("comment-rail-c1-editor").fill("Work on this next.");
     await page.getByTestId("comment-rail-c1-action-save").click();
@@ -208,12 +190,15 @@ test.describe("CriticMarkup review flows", () => {
       .poll(() => readProjectFile(projectDir, "auto-handoff.md"))
       .toContain("Work on this next.");
 
-    const watchResult = await watchPromise;
-    expect(watchResult.timedOut).toBe(false);
-    expect(watchResult.events?.[0]?.relativePath).toBe("auto-handoff.md");
+    await expect(page.getByTestId("agent-comment-inline-status")).toContainText(
+      "Agent working",
+    );
+    await expect(
+      page.getByTestId("document-comment-marker-c1-working"),
+    ).toBeVisible();
   });
 
-  test("submits multiple comments as separate agent handoffs @smoke", async ({
+  test("submits multiple comments as separate agent tasks @smoke", async ({
     page,
   }) => {
     const filePath = writeProjectFile(
@@ -227,50 +212,29 @@ test.describe("CriticMarkup review flows", () => {
       ].join("\n"),
     );
 
-    const watchReview = (relativePath: string) =>
-      page.evaluate(
-        async ({ projectPath, relativePath: watchedPath }) => {
-          const response = await fetch("/api/review-events/watch", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              projectPath,
-              path: watchedPath,
-              fromNow: true,
-              timeoutSeconds: 8,
-              batchWindowSeconds: 0,
-            }),
-          });
-          return response.json() as Promise<{
-            events?: Array<{ relativePath?: string }>;
-            timedOut?: boolean;
-          }>;
-        },
-        { projectPath: projectDir, relativePath },
-      );
-
     await openMarkdownFile(page, filePath);
 
-    const firstWatch = watchReview("multi-handoff.md");
-    await expect(page.getByTestId("review-handoff-button")).toBeVisible();
+    await expect(page.getByTestId("review-handoff-button")).toHaveCount(0);
+    await expect(page.getByTestId("agent-comment-inline-status")).toContainText(
+      "Detached agent ready",
+    );
     await selectRichText(page, "first target");
     await page.getByTestId("comment-rail-c1-editor").fill("Do this first.");
-    await page.getByTestId("comment-rail-c1-action-save").click();
+    await page.getByTestId("comment-rail-c1-action-save").click({
+      force: true,
+    });
     await expect(
       page.getByTestId("document-comment-marker-c1-working"),
     ).toBeVisible();
 
-    const firstResult = await firstWatch;
-    expect(firstResult.timedOut).toBe(false);
-    expect(firstResult.events?.[0]?.relativePath).toBe("multi-handoff.md");
-
-    const secondWatch = watchReview("multi-handoff.md");
-    await expect(
-      page.getByTestId("review-handoff-inline-status"),
-    ).toContainText("Agent watching");
+    await expect(page.getByTestId("agent-comment-inline-status")).toContainText(
+      "Agent working",
+    );
     await selectRichText(page, "second target");
     await page.getByTestId("comment-rail-c2-editor").fill("Then do this.");
-    await page.getByTestId("comment-rail-c2-action-save").click();
+    await page.getByTestId("comment-rail-c2-action-save").click({
+      force: true,
+    });
     await expect(
       page.getByTestId("document-comment-marker-c2-working"),
     ).toBeVisible();
@@ -278,10 +242,6 @@ test.describe("CriticMarkup review flows", () => {
     await expect
       .poll(() => readProjectFile(projectDir, "multi-handoff.md"))
       .toContain("Then do this.");
-
-    const secondResult = await secondWatch;
-    expect(secondResult.timedOut).toBe(false);
-    expect(secondResult.events?.[0]?.relativePath).toBe("multi-handoff.md");
   });
 
   test("double-clicking text opens the comment composer @smoke", async ({

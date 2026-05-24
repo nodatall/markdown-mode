@@ -1,4 +1,4 @@
-import { AlertTriangle, Check, CheckCheck, Copy, Loader2 } from "lucide-react";
+import { AlertTriangle, Check, Copy, Loader2, Send } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DocumentEditorViewMode } from "./app-navigation";
 import { RemoteSessionBanner } from "./components/RemoteSessionBanner";
@@ -17,16 +17,17 @@ import {
   PageCard,
 } from "./PageCard";
 import { buildReviewPrompt } from "./review-prompt";
-import type { Page, StorageBackend } from "./storage";
+import type { AgentCommentSession, Page, StorageBackend } from "./storage";
 
 type DiskChangeState = "clean" | "changed" | "conflict" | "paused";
-type ReviewHandoffState =
-  | "idle"
-  | "notifying"
-  | "notified"
-  | "undelivered"
-  | "error";
 type ReviewPromptCopyState = "idle" | "copying" | "copied" | "error";
+type AgentCommentSubmitState =
+  | "idle"
+  | "submitting"
+  | "working"
+  | "applied"
+  | "needs_attention"
+  | "error";
 
 function getSaveStatusViewModel(
   saveState: DocumentSaveState,
@@ -125,20 +126,17 @@ export function DocumentSaveStatusIndicator({
   );
 }
 
-export function isReviewHandoffDisabled({
+export function isAgentCommentSubmitBlocked({
   saveState,
   documentDiskChangeState,
-  reviewHandoffState,
 }: {
   saveState: DocumentSaveState;
   documentDiskChangeState: DiskChangeState;
-  reviewHandoffState: ReviewHandoffState;
 }) {
   return (
     saveState === "saving" ||
     saveState === "unsaved" ||
     saveState === "error" ||
-    reviewHandoffState !== "idle" ||
     documentDiskChangeState !== "clean"
   );
 }
@@ -171,7 +169,6 @@ interface DocumentWorkspaceProps {
   onDocumentLocalContentChange: (markdown: string) => void;
   documentDiskChangeState: DiskChangeState;
   documentForceResetKey: string | null;
-  onCompleteReview: () => Promise<{ delivered: boolean }>;
   backend: StorageBackend | null;
 }
 
@@ -186,21 +183,22 @@ export function DocumentWorkspace({
   onDocumentLocalContentChange,
   documentDiskChangeState,
   documentForceResetKey,
-  onCompleteReview,
   backend,
 }: DocumentWorkspaceProps) {
   const [documentInteractionMode] =
     useState<DocumentInteractionMode>("editing");
   const [saveState, setSaveState] = useState<DocumentSaveState>("saved");
-  const [reviewHandoffState, setReviewHandoffState] =
-    useState<ReviewHandoffState>("idle");
+  const [agentCommentState, setAgentCommentState] =
+    useState<AgentCommentSubmitState>("idle");
+  const [agentCommentStatusText, setAgentCommentStatusText] = useState("");
+  const [agentSession, setAgentSession] = useState<AgentCommentSession | null>(
+    null,
+  );
   const [reviewPromptCopyState, setReviewPromptCopyState] =
     useState<ReviewPromptCopyState>("idle");
   const [currentMarkdown, setCurrentMarkdown] = useState(
     documentPage?.content ?? "",
   );
-  const [reviewWatcherCount, setReviewWatcherCount] = useState(0);
-  const sawNoWatcherAfterNotifiedRef = useRef(false);
   const saveControllerRef = useRef<DocumentSaveController | null>(null);
 
   const handleSaveStateChange = useCallback(
@@ -214,60 +212,42 @@ export function DocumentWorkspace({
   useEffect(() => {
     const documentIdentity = `${activeDocumentPath ?? ""}:${documentPage?.id ?? ""}`;
     if (!documentIdentity) return;
-    setReviewHandoffState("idle");
+    setAgentCommentState("idle");
+    setAgentCommentStatusText("");
+    setAgentSession(null);
     setReviewPromptCopyState("idle");
-    setCurrentMarkdown(documentPage?.content ?? "");
-  }, [activeDocumentPath, documentPage?.content, documentPage?.id]);
+  }, [activeDocumentPath, documentPage?.id]);
 
   useEffect(() => {
-    if (!backend?.getReviewWatchStatus || !activeDocumentPath) {
-      setReviewWatcherCount(0);
+    setCurrentMarkdown(documentPage?.content ?? "");
+  }, [documentPage?.content]);
+
+  useEffect(() => {
+    if (!backend?.getAgentCommentSession || !activeDocumentPath) {
+      setAgentSession(null);
       return;
     }
 
     let cancelled = false;
-    const refreshWatchStatus = async () => {
+    const refreshAgentSession = async () => {
       try {
-        const status = await backend.getReviewWatchStatus?.(activeDocumentPath);
+        const session =
+          await backend.getAgentCommentSession?.(activeDocumentPath);
         if (!cancelled) {
-          setReviewWatcherCount(status?.watcherCount ?? 0);
+          setAgentSession(session ?? null);
         }
       } catch {
         if (!cancelled) {
-          setReviewWatcherCount(0);
+          setAgentSession(null);
         }
       }
     };
 
-    void refreshWatchStatus();
-    const interval = window.setInterval(refreshWatchStatus, 1500);
+    void refreshAgentSession();
     return () => {
       cancelled = true;
-      window.clearInterval(interval);
     };
   }, [activeDocumentPath, backend]);
-
-  useEffect(() => {
-    if (reviewHandoffState === "undelivered" && reviewWatcherCount > 0) {
-      setReviewHandoffState("idle");
-      return;
-    }
-
-    if (reviewHandoffState !== "notified") {
-      sawNoWatcherAfterNotifiedRef.current = false;
-      return;
-    }
-
-    if (reviewWatcherCount === 0) {
-      sawNoWatcherAfterNotifiedRef.current = true;
-      return;
-    }
-
-    if (sawNoWatcherAfterNotifiedRef.current) {
-      sawNoWatcherAfterNotifiedRef.current = false;
-      setReviewHandoffState("idle");
-    }
-  }, [reviewHandoffState, reviewWatcherCount]);
 
   useEffect(() => {
     if (!documentPage) return;
@@ -294,57 +274,75 @@ export function DocumentWorkspace({
     };
   }, [documentDiskChangeState, documentPage]);
 
-  const sendReviewHandoff = useCallback(
-    async ({
-      flushSaveFirst = false,
-      onlyIfWatcher = false,
-    }: {
-      flushSaveFirst?: boolean;
-      onlyIfWatcher?: boolean;
-    } = {}) => {
-      if (!activeDocumentPath || reviewHandoffState === "notifying") return;
-      if (onlyIfWatcher && reviewWatcherCount <= 0) return;
+  const handleCommentSubmit = useCallback(
+    async (commentId: string) => {
+      if (!activeDocumentPath || agentCommentState === "submitting") {
+        return false;
+      }
 
-      setReviewHandoffState("notifying");
+      setAgentCommentState("submitting");
+      setAgentCommentStatusText("Submitting comment");
       try {
-        if (flushSaveFirst) {
-          const saveResult = await saveControllerRef.current?.flushSave();
-          if (saveResult && saveResult.status !== "saved") {
-            setReviewHandoffState(
-              saveResult.status === "blocked" ? "idle" : "error",
-            );
-            return;
-          }
+        const saveResult = await saveControllerRef.current?.flushSave();
+        if (saveResult && saveResult.status !== "saved") {
+          setAgentCommentState(
+            saveResult.status === "blocked" ? "idle" : "error",
+          );
+          setAgentCommentStatusText(
+            saveResult.status === "blocked"
+              ? ""
+              : "Could not save before submitting the comment.",
+          );
+          return false;
         }
 
-        const result = await onCompleteReview();
-        if (result.delivered) {
-          setReviewWatcherCount(0);
-          setReviewHandoffState("notified");
-        } else {
-          setReviewWatcherCount(0);
-          setReviewHandoffState("undelivered");
+        if (
+          !backend?.submitAgentCommentTask ||
+          !agentSession?.adapter.available
+        ) {
+          setAgentCommentState("needs_attention");
+          setAgentCommentStatusText(
+            agentSession?.adapter.reason ??
+              "No agent adapter is available. Use the copy prompt fallback.",
+          );
+          return false;
         }
+
+        const result = await backend.submitAgentCommentTask(
+          activeDocumentPath,
+          {
+            commentId,
+          },
+        );
+        const task = result.task;
+        if (task.status === "accepted" || task.status === "working") {
+          setAgentCommentState("working");
+          setAgentCommentStatusText("Agent task submitted");
+          return true;
+        }
+        if (task.status === "applied") {
+          setAgentCommentState("applied");
+          setAgentCommentStatusText("Agent applied the comment");
+          return false;
+        }
+        setAgentCommentState(
+          task.status === "failed" ? "error" : "needs_attention",
+        );
+        setAgentCommentStatusText(
+          task.error ?? "The agent task needs attention.",
+        );
+        return false;
       } catch (error) {
-        console.error("Failed to complete review:", error);
-        setReviewHandoffState("error");
+        console.error("Failed to submit agent comment task:", error);
+        setAgentCommentState("error");
+        setAgentCommentStatusText(
+          "Roughdraft could not submit this comment to an agent.",
+        );
+        return false;
       }
     },
-    [
-      activeDocumentPath,
-      onCompleteReview,
-      reviewHandoffState,
-      reviewWatcherCount,
-    ],
+    [activeDocumentPath, agentCommentState, agentSession, backend],
   );
-
-  const handleCompleteReview = useCallback(async () => {
-    await sendReviewHandoff();
-  }, [sendReviewHandoff]);
-
-  const handleCommentSubmit = useCallback(async () => {
-    await sendReviewHandoff({ flushSaveFirst: true, onlyIfWatcher: true });
-  }, [sendReviewHandoff]);
 
   const handleLocalContentChange = useCallback(
     (markdown: string) => {
@@ -364,9 +362,10 @@ export function DocumentWorkspace({
 
   const canCopyReviewPrompt =
     !!activeDocumentPath &&
-    reviewWatcherCount === 0 &&
     hasReviewFeedback &&
-    reviewHandoffState !== "notifying";
+    agentCommentState !== "submitting" &&
+    agentCommentState !== "working" &&
+    agentSession?.adapter.available !== true;
 
   const handleCopyReviewPrompt = useCallback(async () => {
     if (!activeDocumentPath || !canCopyReviewPrompt) return;
@@ -401,43 +400,43 @@ export function DocumentWorkspace({
     saveState,
   ]);
 
-  const showReviewHandoffButton =
-    !!activeDocumentPath &&
-    (reviewWatcherCount > 0 || reviewHandoffState !== "idle");
-  const showCopyReviewPromptButton =
-    canCopyReviewPrompt && !showReviewHandoffButton;
+  const showAgentCommentStatus =
+    !!activeDocumentPath && agentCommentState !== "idle";
+  const showCopyReviewPromptButton = canCopyReviewPrompt;
   const copyReviewPromptLabel =
     reviewPromptCopyState === "copied"
       ? "Copied review prompt"
       : reviewPromptCopyState === "error"
         ? "Copy failed"
         : "Copy review prompt";
-  const reviewHandoffButtonLabel =
-    reviewHandoffState === "notifying"
-      ? "Sending"
-      : reviewHandoffState === "notified"
-        ? "Sent"
-        : reviewHandoffState === "error" || reviewHandoffState === "undelivered"
-          ? "Not sent"
-          : "Done Reviewing";
-  const ReviewHandoffButtonIcon =
-    reviewHandoffState === "notifying"
+  const agentStatusTitle =
+    agentCommentState === "submitting"
+      ? "Submitting comment"
+      : agentCommentState === "working"
+        ? "Agent is working"
+        : agentCommentState === "applied"
+          ? "Agent applied comment"
+          : agentCommentState === "needs_attention"
+            ? "Agent unavailable"
+            : "Could not submit comment";
+  const AgentStatusIcon =
+    agentCommentState === "submitting"
       ? Loader2
-      : reviewHandoffState === "error" || reviewHandoffState === "undelivered"
-        ? AlertTriangle
-        : CheckCheck;
-  const reviewHandoffStatusTitle =
-    reviewHandoffState === "undelivered"
-      ? "No agent is watching now"
-      : reviewHandoffState === "error"
-        ? "Could not notify agent"
-        : "Your agent is now working";
-  const reviewHandoffStatusBody =
-    reviewHandoffState === "undelivered"
-      ? "The handoff was not delivered because the watcher is no longer connected."
-      : reviewHandoffState === "error"
-        ? "Roughdraft could not send the handoff. Check that the local server is still running."
-        : "It will take the appropriate next action, including addressing comments, questions, and suggestions, and/or directly editing the doc.";
+      : agentCommentState === "working"
+        ? Send
+        : agentCommentState === "applied"
+          ? Check
+          : AlertTriangle;
+  const inlineAgentLabel =
+    agentCommentState === "submitting"
+      ? "Submitting"
+      : agentCommentState === "working"
+        ? "Agent working"
+        : agentSession?.mode === "attached"
+          ? "Connected to thread"
+          : agentSession?.adapter.available
+            ? "Detached agent ready"
+            : "Detached";
 
   return (
     <div
@@ -449,54 +448,49 @@ export function DocumentWorkspace({
         data-testid="document-status-stack"
         data-document-status-stack="true"
       >
-        {showReviewHandoffButton ? (
+        {showAgentCommentStatus ? (
           <Popover>
             <PopoverTrigger
               render={
                 <Button
                   type="button"
-                  data-testid="review-handoff-button"
+                  data-testid="agent-comment-task-button"
                   size="lg"
-                  aria-label={reviewHandoffButtonLabel}
-                  title={reviewHandoffButtonLabel}
+                  aria-label={agentStatusTitle}
+                  title={agentStatusTitle}
                   className="size-9 rounded-full bg-black p-0 text-white shadow-[0_10px_28px_rgba(0,0,0,0.18)] hover:bg-black/85 focus-visible:ring-black/25 dark:bg-black dark:text-white dark:hover:bg-black/85 dark:focus-visible:ring-white/30"
-                  disabled={isReviewHandoffDisabled({
-                    saveState,
-                    documentDiskChangeState,
-                    reviewHandoffState,
-                  })}
-                  onClick={() => void handleCompleteReview()}
                 >
-                  <ReviewHandoffButtonIcon
+                  <AgentStatusIcon
                     className={cn(
                       "size-4",
-                      reviewHandoffState === "notifying" && "animate-spin",
+                      agentCommentState === "submitting" && "animate-spin",
                     )}
                   />
                 </Button>
               }
             />
             <PopoverContent
-              aria-label="Review handoff status"
-              data-testid="review-handoff-status"
+              aria-label="Agent comment task status"
+              data-testid="agent-comment-task-status"
             >
               <div className="flex items-start gap-3">
                 <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-black text-white dark:bg-white dark:text-black">
-                  {reviewHandoffState === "notifying" ? (
+                  {agentCommentState === "submitting" ? (
                     <Loader2 className="size-4 animate-spin" />
-                  ) : reviewHandoffState === "error" ||
-                    reviewHandoffState === "undelivered" ? (
+                  ) : agentCommentState === "error" ||
+                    agentCommentState === "needs_attention" ? (
                     <AlertTriangle className="size-4" />
                   ) : (
-                    <CheckCheck className="size-4" />
+                    <AgentStatusIcon className="size-4" />
                   )}
                 </span>
                 <div>
                   <div className="text-sm font-semibold text-stone-950 dark:text-slate-50">
-                    {reviewHandoffStatusTitle}
+                    {agentStatusTitle}
                   </div>
                   <p className="mt-1 text-sm leading-6 text-stone-600 dark:text-slate-300">
-                    {reviewHandoffStatusBody}
+                    {agentCommentStatusText ||
+                      "Roughdraft submitted the saved comment as an agent task."}
                   </p>
                 </div>
               </div>
@@ -553,31 +547,28 @@ export function DocumentWorkspace({
                 </div>
                 {activeDocumentPath ? (
                   <div className="ml-auto flex shrink-0 items-center gap-1.5">
-                    {reviewHandoffState !== "notified" &&
-                    (reviewHandoffState !== "idle" ||
-                      reviewWatcherCount > 0) ? (
+                    {agentSession || agentCommentState !== "idle" ? (
                       <span
-                        data-testid="review-handoff-inline-status"
+                        data-testid="agent-comment-inline-status"
                         role="status"
-                        aria-label="Review handoff"
+                        aria-label="Agent comment session"
                         className="inline-flex shrink-0 items-center gap-1 font-mono text-[0.6rem] tracking-[0.01em] text-stone-400 dark:text-stone-500"
                       >
-                        {reviewHandoffState === "notifying" ? (
+                        {agentCommentState === "submitting" ? (
                           <Loader2 className="size-[0.6rem] animate-spin" />
-                        ) : reviewHandoffState === "error" ||
-                          reviewHandoffState === "undelivered" ? (
+                        ) : agentCommentState === "error" ||
+                          agentCommentState === "needs_attention" ? (
                           <AlertTriangle className="size-[0.6rem]" />
-                        ) : reviewWatcherCount > 0 ? (
-                          <CheckCheck className="size-[0.6rem]" />
+                        ) : agentCommentState === "working" ? (
+                          <Send className="size-[0.6rem]" />
+                        ) : agentSession?.mode === "attached" ? (
+                          <Send className="size-[0.6rem]" />
+                        ) : agentSession?.adapter.available ? (
+                          <Send className="size-[0.6rem]" />
                         ) : (
-                          <CheckCheck className="size-[0.6rem]" />
+                          <Copy className="size-[0.6rem]" />
                         )}
-                        {reviewHandoffState === "notifying"
-                          ? "Notifying"
-                          : reviewHandoffState === "error" ||
-                              reviewHandoffState === "undelivered"
-                            ? "Review not sent"
-                            : "Agent watching"}
+                        {inlineAgentLabel}
                       </span>
                     ) : null}
                   </div>
@@ -603,9 +594,7 @@ export function DocumentWorkspace({
               onSaveControllerChange={(controller) => {
                 saveControllerRef.current = controller;
               }}
-              onCommentSubmit={() => {
-                void handleCommentSubmit();
-              }}
+              onCommentSubmit={handleCommentSubmit}
               saveBlocked={documentDiskChangeState !== "clean"}
               forceResetKey={documentForceResetKey}
             />

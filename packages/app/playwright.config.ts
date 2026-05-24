@@ -25,7 +25,7 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: `API_PORT=${apiPort} ${pnpmBin} exec tsx e2e/start-api.ts`,
+      command: `ROUGHDRAFT_AGENT_ADAPTER=fake API_PORT=${apiPort} ${pnpmBin} exec tsx e2e/start-api.ts`,
       port: apiPort,
       reuseExistingServer: !process.env.CI,
       stdout: "pipe",

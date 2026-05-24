@@ -131,6 +131,7 @@ describe("cli", () => {
     const deps = createCliDependencies({
       env: {
         ...process.env,
+        CODEX_THREAD_ID: "",
         ROUGHDRAFT_STATE_DIR: stateDir,
         ROUGHDRAFT_DEV_FRONTEND_STATE_FILE: devFrontendStateFile,
       },
@@ -317,6 +318,7 @@ describe("cli", () => {
     const deps = createCliDependencies({
       env: {
         ...process.env,
+        CODEX_THREAD_ID: "",
         ROUGHDRAFT_STATE_DIR: stateDir,
       },
       cwd: projectDir,
@@ -403,15 +405,59 @@ describe("cli", () => {
     expect(test.getLastOpenedUrl()).toBeNull();
   });
 
-  it("emits JSON from open --no-watch --json without scraping human prose", async () => {
+  it("adds explicit origin thread metadata to the opened URL", async () => {
     const test = createTestDependencies();
     const documentPath = path.join(projectDir, "draft.md");
     fs.writeFileSync(documentPath, "# Draft\n");
 
     const exitCode = await runCli(
-      ["open", documentPath, "--no-watch", "--json"],
+      ["open", documentPath, "--print-url", "--origin-thread-id", "thread-1"],
       test.deps,
     );
+    const openedUrl = new URL(test.logs[0] ?? "");
+
+    expect(exitCode).toBe(0);
+    expect(openedUrl.searchParams.get("path")).toBe(documentPath);
+    expect(openedUrl.searchParams.get("originThreadId")).toBe("thread-1");
+  });
+
+  it("uses CODEX_THREAD_ID for attached opens unless detached is requested", async () => {
+    const test = createTestDependencies();
+    const documentPath = path.join(projectDir, "draft.md");
+    fs.writeFileSync(documentPath, "# Draft\n");
+    const deps = {
+      ...test.deps,
+      env: {
+        ...test.deps.env,
+        CODEX_THREAD_ID: "thread-from-env",
+      },
+    };
+
+    const attachedExitCode = await runCli(
+      ["open", documentPath, "--print-url"],
+      deps,
+    );
+    const detachedExitCode = await runCli(
+      ["open", documentPath, "--print-url", "--detached"],
+      deps,
+    );
+    const attachedUrl = new URL(test.logs[0] ?? "");
+    const detachedUrl = new URL(test.logs[1] ?? "");
+
+    expect(attachedExitCode).toBe(0);
+    expect(detachedExitCode).toBe(0);
+    expect(attachedUrl.searchParams.get("originThreadId")).toBe(
+      "thread-from-env",
+    );
+    expect(detachedUrl.searchParams.get("originThreadId")).toBeNull();
+  });
+
+  it("emits JSON from default open --json without waiting", async () => {
+    const test = createTestDependencies();
+    const documentPath = path.join(projectDir, "draft.md");
+    fs.writeFileSync(documentPath, "# Draft\n");
+
+    const exitCode = await runCli(["open", documentPath, "--json"], test.deps);
     const persisted = JSON.parse(
       fs.readFileSync(getServerStateFilePath(test.deps.env), "utf8"),
     ) as { port: number };
@@ -421,6 +467,7 @@ describe("cli", () => {
       serverUrl: string;
       path: string;
       openMode: string;
+      originThreadId: string | null;
     }>(test.logs);
 
     expect(exitCode).toBe(0);
@@ -429,6 +476,7 @@ describe("cli", () => {
       url: expectedOpenUrl(`http://localhost:${persisted.port}`, documentPath),
       serverUrl: `http://localhost:${persisted.port}`,
       path: documentPath,
+      originThreadId: null,
       openMode: "disabled",
     });
   });
@@ -458,6 +506,7 @@ describe("cli", () => {
     const deps = createCliDependencies({
       env: {
         ...process.env,
+        CODEX_THREAD_ID: "",
         ROUGHDRAFT_STATE_DIR: stateDir,
         ROUGHDRAFT_DEV_FRONTEND_STATE_FILE: devFrontendStateFile,
       },
@@ -518,7 +567,7 @@ describe("cli", () => {
     );
   });
 
-  it("posts the default open watcher to the dev API behind the live frontend", async () => {
+  it("posts an explicit open --watch watcher to the dev API behind the live frontend", async () => {
     const documentPath = path.join(projectDir, "draft.md");
     fs.writeFileSync(documentPath, "# Draft\n");
     fs.writeFileSync(
@@ -544,6 +593,7 @@ describe("cli", () => {
     const deps = createCliDependencies({
       env: {
         ...process.env,
+        CODEX_THREAD_ID: "",
         ROUGHDRAFT_STATE_DIR: stateDir,
         ROUGHDRAFT_DEV_FRONTEND_STATE_FILE: devFrontendStateFile,
       },
@@ -605,7 +655,7 @@ describe("cli", () => {
     });
 
     const exitCode = await runCli(
-      ["open", documentPath, "--json", "--batch-window", "0"],
+      ["open", documentPath, "--watch", "--json", "--batch-window", "0"],
       deps,
     );
 
@@ -677,6 +727,7 @@ describe("cli", () => {
     const deps = createCliDependencies({
       env: {
         ...process.env,
+        CODEX_THREAD_ID: "",
         ROUGHDRAFT_STATE_DIR: stateDir,
         ROUGHDRAFT_DEV_FRONTEND_STATE_FILE: devFrontendStateFile,
       },
@@ -854,7 +905,7 @@ describe("cli", () => {
     });
   });
 
-  it("opens a document and waits for the next review event by default from open --json", async () => {
+  it("opens a document and waits for the next review event from open --watch --json", async () => {
     const test = createTestDependencies();
     const documentPath = path.join(projectDir, "draft.md");
     fs.writeFileSync(documentPath, "# Draft\n");
@@ -886,7 +937,7 @@ describe("cli", () => {
     };
 
     const watchPromise = runCli(
-      ["open", documentPath, "--json", "--batch-window", "0"],
+      ["open", documentPath, "--watch", "--json", "--batch-window", "0"],
       deps,
     );
 
@@ -975,6 +1026,7 @@ describe("cli", () => {
     const deps = createCliDependencies({
       env: {
         ...process.env,
+        CODEX_THREAD_ID: "",
         ROUGHDRAFT_STATE_DIR: stateDir,
       },
       cwd: projectDir,
@@ -1068,6 +1120,7 @@ describe("cli", () => {
     const deps = createCliDependencies({
       env: {
         ...process.env,
+        CODEX_THREAD_ID: "",
         ROUGHDRAFT_STATE_DIR: stateDir,
       },
       cwd: projectDir,
@@ -1127,6 +1180,7 @@ describe("cli", () => {
     const deps = createCliDependencies({
       env: {
         ...process.env,
+        CODEX_THREAD_ID: "",
         ROUGHDRAFT_STATE_DIR: stateDir,
       },
       cwd: projectDir,
@@ -1203,9 +1257,9 @@ describe("cli", () => {
     expect(test.logs).toContain(
       '  Replace {~~vague phrasing~>specific wording~~}{id="s2" by="AI" at="2026-04-28T12:06:00.000Z"}.',
     );
-    expect(test.logs).toContain("Reply to an existing comment:");
+    expect(test.logs).toContain("Comment guidance:");
     expect(test.logs).toContain(
-      '  Use explicit `id="..."` and `re="..."` metadata for replies.',
+      "  Add new feedback as a root comment or suggested change.",
     );
     expect(test.logs).toContain(
       "  Comment ids are document-local and usually look like `c1`, `c2`, `c3`.",
@@ -1287,11 +1341,15 @@ describe("cli", () => {
 
     expect(exitCode).toBe(0);
     expect(test.logs).toContain(
-      "  roughdraft open <path> [--no-open] [--no-watch] [--print-url] [--port <port>]",
+      "  roughdraft open <path> [--no-open] [--watch] [--print-url] [--port <port>]",
     );
     expect(test.logs).toContain(
-      "  --no-watch           Open the file without waiting",
+      "  --watch              Wait for the legacy Done Reviewing event",
     );
+    expect(test.logs).toContain(
+      "  --no-watch           Compatibility no-op; open returns by default",
+    );
+    expect(test.logs).toContain("  --origin-thread-id <id>");
     expect(test.logs).toContain(
       "  --timeout <seconds>  Maximum watch time; omitted means no timeout",
     );
@@ -1340,6 +1398,7 @@ describe("cli", () => {
     const deps = createCliDependencies({
       env: {
         ...process.env,
+        CODEX_THREAD_ID: "",
         ROUGHDRAFT_DEV_WRAPPER_NAME: "roughdraft-dev-lyon-v2",
         ROUGHDRAFT_DEV_WRAPPER_PATH: wrapperPath,
         ROUGHDRAFT_DEV_WRAPPER_REPO_ROOT: serverRoot,

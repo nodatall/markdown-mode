@@ -42,7 +42,7 @@ roughdraft_cmd="roughdraft-dev-$worktree_name"
 
 command -v "$roughdraft_cmd" >/dev/null || pnpm dev:install-cli
 "$roughdraft_cmd" start
-"$roughdraft_cmd" open "$worktree_root/.context/ui-state-fixtures/review.md" --print-url --no-open --no-watch
+"$roughdraft_cmd" open "$worktree_root/.context/ui-state-fixtures/review.md" --print-url --no-open --detached
 ```
 ## Fixture Documents
 Create these under `.context/ui-state-fixtures/` when a capture run needs stable local-file states.
@@ -94,11 +94,12 @@ Paragraph with **bold**, [link](https://example.com), `inline code`.
 | Document | Save status: failed | Force save error | `document-save-status` | Use backend/API mocking or a component harness. |
 | Document | Disk changed | Open local file, modify file externally | `document-save-status`, `rich-text-editor`, `markdown-code-editor` | Disk content is authoritative; the document reloads without a conflict banner. |
 | Document | Stale save reload | Edit in browser after an external write | `document-save-status`, `document-content-card` | The disk version replaces transient local draft state; no keep-editing or overwrite actions. |
-| Document | Review handoff idle | Open a local file while a watcher is connected | `review-handoff-button` | Header text: `Agent watching`. |
-| Document | Review handoff sending | Click handoff button while watcher is connected | `review-handoff-button` | Button label: `Sending`. |
-| Document | Review handoff sent | Successful handoff | `review-handoff-status` | Popover title: `Your agent is now working`. |
-| Document | Review handoff undelivered | Watcher disconnects before handoff | `review-handoff-status` | Popover title: `No agent is watching now`. |
-| Document | Review handoff error | Force handoff API error | `review-handoff-status` | Popover title: `Could not notify agent`. |
+| Document | Agent comment detached ready | Open a local file with an available detached adapter | `agent-comment-inline-status` | Header text: `Detached agent ready`; no Done Reviewing button. |
+| Document | Agent comment attached ready | Open with `?originThreadId=<id>` and an available attached adapter | `agent-comment-inline-status` | Header text: `Connected to thread`; thread id is not rendered in document text. |
+| Document | Agent comment submitting | Save a comment with a delayed submit response | `agent-comment-task-button`, `agent-comment-inline-status` | Status label: `Submitting`; popover title: `Submitting comment`. |
+| Document | Agent comment working | Submit a comment with fake adapter status `working` | `agent-comment-task-button`, `document-comment-marker-c1-working` | Status label: `Agent working`; comment marker has a working pulse. |
+| Document | Agent comment needs attention | Submit with no configured adapter or an unsupported mode | `agent-comment-task-status` | Popover title: `Agent unavailable`; saved CriticMarkup comment remains visible. |
+| Document | Copy prompt fallback | Open a commented local file without an available adapter | `review-copy-prompt-button` | Copy button is secondary fallback when agent submit is unavailable. |
 | Remote | Connected banner | Open with `?session=<id>&token=<token>` and remote capability enabled | `role=status`, `aria-label="Remote session connected"` | Requires remote backend support in `/api/status`. |
 | Remote | Disconnected banner | Drop remote session connection | `role=alert`, `aria-label="Remote session disconnected"` | Best captured with backend mocking. |
 | Editor | Selection menu | Select text in rich editor | `selection-menu` | Capture formatting buttons and comment/suggestion actions. |
@@ -125,7 +126,7 @@ await browser.close();
 
 ```
 
-For interaction-heavy states, prefer selectors over coordinates. The current code has stable `data-testid` hooks for the homepage storyboard, review handoff button, save status, comment markers/popover, suggestion rail, rich editor, code editor, link popover, and context menu.
+For interaction-heavy states, prefer selectors over coordinates. The current code has stable `data-testid` hooks for the homepage storyboard, agent comment status, save status, comment markers/popover, suggestion rail, rich editor, code editor, link popover, and context menu.
 ## States That Need A Harness Or Mocking
 These are real product states, but they are awkward to capture deterministically through only public routes:
 

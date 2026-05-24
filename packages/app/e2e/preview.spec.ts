@@ -28,9 +28,7 @@ test.describe("in-memory preview", () => {
     });
   });
 
-  test("does not show agent handoff controls without a watcher", async ({
-    page,
-  }) => {
+  test("does not show Done Reviewing controls in preview", async ({ page }) => {
     await page.goto("/preview");
 
     await expect(page.getByTestId("review-handoff-button")).toHaveCount(0);
@@ -38,7 +36,7 @@ test.describe("in-memory preview", () => {
       "Saved",
     );
 
-    logE2eEvent("preview.no-handoff-without-watcher", {
+    logE2eEvent("preview.no-done-reviewing-control", {
       route: "/preview",
     });
   });

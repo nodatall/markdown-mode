@@ -54,6 +54,7 @@ export type ManualSaveResult =
   | { status: "saved" }
   | { status: "blocked" }
   | { status: "error"; error: unknown };
+type CommentSubmitResult = boolean | undefined | Promise<boolean | undefined>;
 
 export interface DocumentSaveController {
   flushSave: () => Promise<ManualSaveResult>;
@@ -78,7 +79,7 @@ interface PageCardProps {
   onDirtyStateChange?: (isDirty: boolean) => void;
   onLocalContentChange?: (markdown: string) => void;
   onSaveControllerChange?: (controller: DocumentSaveController | null) => void;
-  onCommentSubmit?: (commentId: string) => void | Promise<void>;
+  onCommentSubmit?: (commentId: string) => CommentSubmitResult;
   saveBlocked?: boolean;
   forceResetKey?: string | null;
 }
@@ -99,7 +100,7 @@ interface PageCardEditorSurfaceProps {
   onDirtyStateChange?: (isDirty: boolean) => void;
   onLocalContentChange?: (markdown: string) => void;
   onSaveControllerChange?: (controller: DocumentSaveController | null) => void;
-  onCommentSubmit?: (commentId: string) => void | Promise<void>;
+  onCommentSubmit?: (commentId: string) => void;
   saveBlocked?: boolean;
   forceResetKey?: string | null;
 }
@@ -116,7 +117,7 @@ interface RichTextEditorSurfaceProps {
   backend: StorageBackend;
   onEditorReady?: (editor: Editor | null) => void;
   onCommentRailPresenceChange?: (hasCommentRailSpace: boolean) => void;
-  onCommentSubmit?: (commentId: string) => void | Promise<void>;
+  onCommentSubmit?: (commentId: string) => void;
   commentDrafts?: Record<string, string>;
   onCommentDraftsChange?: Dispatch<SetStateAction<Record<string, string>>>;
   editingCommentIds?: string[];
@@ -2250,7 +2251,15 @@ const PageCardEditorSurface = memo(function PageCardEditorSurface({
   }, [commentDrafts, editingCommentIds.length, reportDraftActiveState]);
 
   const markCommentWorking = useCallback(
-    (commentId: string) => {
+    async (commentId: string) => {
+      const shouldMarkWorking = await Promise.resolve(
+        onCommentSubmit?.(commentId),
+      ).catch((error) => {
+        console.error("Failed to submit comment task:", error);
+        return false;
+      });
+      if (shouldMarkWorking === false) return;
+
       setWorkingCommentIds((current) => {
         const next = new Set(current);
         next.add(commentId);
@@ -2272,10 +2281,6 @@ const PageCardEditorSurface = memo(function PageCardEditorSurface({
         });
       }, 45_000);
       workingCommentTimersRef.current.set(commentId, timer);
-
-      void Promise.resolve(onCommentSubmit?.(commentId)).catch((error) => {
-        console.error("Failed to submit comment handoff:", error);
-      });
     },
     [onCommentSubmit],
   );

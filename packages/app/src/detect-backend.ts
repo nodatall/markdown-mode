@@ -22,6 +22,7 @@ export async function detectBackend(): Promise<StorageBackend> {
 
   const sessionId = readSessionIdFromUrl();
   const token = readTokenFromUrl();
+  const originThreadId = readOriginThreadIdFromUrl();
 
   let statusPayload: StatusPayload | null = null;
 
@@ -52,6 +53,8 @@ export async function detectBackend(): Promise<StorageBackend> {
           ? "Open a markdown file"
           : "Markdown file on disk",
         projectPath: statusPayload.projectDir,
+        originThreadId: originThreadId ?? undefined,
+        authToken: token || undefined,
       });
     }
   }
@@ -70,4 +73,11 @@ function readTokenFromUrl(): string {
   if (typeof window === "undefined") return "";
   const params = new URLSearchParams(window.location.search);
   return params.get("token")?.trim() ?? "";
+}
+
+function readOriginThreadIdFromUrl(): string | null {
+  if (typeof window === "undefined") return null;
+  const params = new URLSearchParams(window.location.search);
+  const originThreadId = params.get("originThreadId")?.trim();
+  return originThreadId && originThreadId.length > 0 ? originThreadId : null;
 }
