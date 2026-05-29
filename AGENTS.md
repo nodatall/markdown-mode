@@ -1,4 +1,4 @@
-# Roughdraft Agent Instructions
+# Markdown Mode Agent Instructions
 
 ## Testing Principles
 
@@ -63,10 +63,10 @@ Keep generated screenshot runs in `.context/ui-state-screenshots/` unless the us
 
 ## Worktree-Specific CLI
 
-This repo installs a worktree-specific Roughdraft CLI wrapper during setup.
+This repo installs a worktree-specific Markdown Mode CLI wrapper during setup.
 
-- `roughdraft` is the published npm package
-- `roughdraft-dev-<worktree-name>` is the local CLI for one specific checkout
+- `markdownmode` is the published npm package
+- `markdownmode-dev-<worktree-name>` is the local CLI for one specific checkout
 
 In a fresh worktree, `pnpm setup` runs `pnpm dev:install-cli`, which creates a wrapper in `~/.local/bin` by default.
 
@@ -75,16 +75,16 @@ To derive the correct command for the current checkout, use the git worktree roo
 ```bash
 worktree_root="$(git rev-parse --show-toplevel)"
 worktree_name="$(basename "$worktree_root")"
-roughdraft_cmd="roughdraft-dev-$worktree_name"
+markdownmode_cmd="markdownmode-dev-$worktree_name"
 ```
 
 Example in this checkout:
 
 ```bash
-roughdraft-dev-shanghai-v4 start
+markdownmode-dev-shanghai-v4 start
 ```
 
-Do not use the global `roughdraft` command for repo-local development in this repo unless the user explicitly asks for the published package.
+Do not use the global `markdownmode` command for repo-local development in this repo unless the user explicitly asks for the published package.
 
 ## Fallback If The Wrapper Is Missing
 
@@ -95,7 +95,7 @@ cd "$(git rev-parse --show-toplevel)"
 pnpm dev:install-cli
 ```
 
-Then recompute `roughdraft_cmd` and use it.
+Then recompute `markdownmode_cmd` and use it.
 
 ## Pull Request Workflow
 
@@ -128,49 +128,49 @@ Plan file guidelines:
 - Keep product-boundary decisions aligned with the ADRs; if the plan needs to change a recorded decision, call that out explicitly.
 - Use CriticMarkup for inline review notes when helpful.
 
-After writing the plan, open it in Roughdraft for review:
+After writing the plan, open it in Markdown Mode for review:
 
 ```bash
 worktree_root="$(git rev-parse --show-toplevel)"
 worktree_name="$(basename "$worktree_root")"
-roughdraft_cmd="roughdraft-dev-$worktree_name"
-"$roughdraft_cmd" start
-"$roughdraft_cmd" open "$worktree_root/.context/<plan-file>.md" --watch
+markdownmode_cmd="markdownmode-dev-$worktree_name"
+"$markdownmode_cmd" start
+"$markdownmode_cmd" open "$worktree_root/.context/<plan-file>.md" --watch
 ```
 
-After the user finishes reviewing in Roughdraft, read the plan file from disk and address any CriticMarkup feedback before implementing.
+After the user finishes reviewing in Markdown Mode, read the plan file from disk and address any CriticMarkup feedback before implementing.
 
-## Roughdraft Workflow
+## Markdown Mode Workflow
 
-Use Roughdraft when the user wants to open, review, or comment on a Markdown file.
+Use Markdown Mode when the user wants to open, review, or comment on a Markdown file.
 
-The user may refer to Roughdraft as `rd` in natural language. Treat `rd` as shorthand for Roughdraft in user requests, but do not create or modify any shell alias, executable, symlink, or command named `rd`.
+The user may refer to Markdown Mode as `rd` in natural language. Treat `rd` as shorthand for Markdown Mode in user requests, but do not create or modify any shell alias, executable, symlink, or command named `rd`.
 
 Preferred flow:
 
-1. Derive `roughdraft_cmd` for the current worktree.
+1. Derive `markdownmode_cmd` for the current worktree.
 2. Start the local server if needed:
 
 ```bash
-"$roughdraft_cmd" start
+"$markdownmode_cmd" start
 ```
 
 3. Open the relevant Markdown file:
 
 ```bash
-"$roughdraft_cmd" open "/absolute/path/to/file.md"
+"$markdownmode_cmd" open "/absolute/path/to/file.md"
 ```
 
-4. Treat submitted Roughdraft comments as individual work requests. Read the markdown file from disk and make the requested changes for the specific CriticMarkup item.
+4. Treat submitted Markdown Mode comments as individual work requests. Read the markdown file from disk and make the requested changes for the specific CriticMarkup item.
 
 Use `--watch` only when you explicitly need the legacy blocking review-event flow.
 
 Useful commands:
 
 ```bash
-"$roughdraft_cmd" status
-"$roughdraft_cmd" stop
-"$roughdraft_cmd" help
+"$markdownmode_cmd" status
+"$markdownmode_cmd" stop
+"$markdownmode_cmd" help
 ```
 
 ## CriticMarkup

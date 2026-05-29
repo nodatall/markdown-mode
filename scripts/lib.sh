@@ -3,7 +3,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-state_dir="$repo_root/.roughdraft-state"
+state_dir="$repo_root/.markdownmode-state"
 setup_lock_dir="$state_dir/setup.lock"
 setup_stamp="$state_dir/setup.complete"
 

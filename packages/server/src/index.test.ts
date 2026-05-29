@@ -16,8 +16,8 @@ describe("createApp", () => {
   );
 
   beforeEach(() => {
-    projectDir = fs.mkdtempSync(path.join(os.tmpdir(), "roughdraft-server-"));
-    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "roughdraft-home-"));
+    projectDir = fs.mkdtempSync(path.join(os.tmpdir(), "markdownmode-server-"));
+    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "markdownmode-home-"));
   });
 
   afterEach(() => {
@@ -176,7 +176,7 @@ describe("createApp", () => {
         path: "notes/draft.md",
       })
       .send({
-        content: "# Roughdraft change\n",
+        content: "# Markdown Mode change\n",
         expectedVersion: readResponse.body.version,
       });
 
@@ -221,7 +221,7 @@ describe("createApp", () => {
         path: "draft.md",
       })
       .send({
-        content: "# Roughdraft\n",
+        content: "# Markdown Mode\n",
         expectedVersion: readResponse.body.version,
       });
 
@@ -601,7 +601,7 @@ describe("createApp", () => {
     const packageJsonPath = path.join(projectDir, "package.json");
     fs.writeFileSync(
       packageJsonPath,
-      JSON.stringify({ name: "roughdraft", version: "0.1.0" }),
+      JSON.stringify({ name: "markdownmode", version: "0.1.0" }),
     );
 
     const { app } = createApp({
@@ -619,11 +619,11 @@ describe("createApp", () => {
 
     expect(response.status).toBe(200);
     expect(response.body).toEqual({
-      packageName: "roughdraft",
+      packageName: "markdownmode",
       currentVersion: "0.1.0",
       latestVersion: "0.2.0",
       updateAvailable: true,
-      updateCommand: "npm i -g roughdraft@latest",
+      updateCommand: "npm i -g markdownmode@latest",
     });
   });
 
@@ -780,13 +780,13 @@ describe("createApp", () => {
 
     expect(assetResponse.status).toBe(201);
     expect(assetResponse.body).toMatchObject({
-      markdownPath: "./.roughdraft-assets/My-Sketch.png",
+      markdownPath: "./.markdownmode-assets/My-Sketch.png",
       mimeType: "image/png",
     });
     expect(assetResponse.body.previewUrl).toContain("/api/files?");
     expect(
       fs.readFileSync(
-        path.join(projectDir, ".roughdraft-assets", "My-Sketch.png"),
+        path.join(projectDir, ".markdownmode-assets", "My-Sketch.png"),
         "utf-8",
       ),
     ).toBe("png bytes");

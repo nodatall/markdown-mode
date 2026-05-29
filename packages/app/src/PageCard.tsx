@@ -1749,6 +1749,31 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
     [emitMarkdownChange],
   );
 
+  const closeSubmittedDraftComment = useCallback(
+    (commentId: string, wasDraftComment: boolean) => {
+      if (!wasDraftComment) return;
+
+      const currentEditor = editorRef.current;
+      if (currentEditor) {
+        const range = findCommentRange(currentEditor, commentId);
+        const collapsePosition = range?.to ?? currentEditor.state.selection.to;
+        currentEditor.commands.setTextSelection(collapsePosition);
+        currentEditor.commands.blur();
+      }
+
+      setSelectedCommentId((current) =>
+        current === commentId ? null : current,
+      );
+      setHoveredCommentId((current) =>
+        current === commentId ? null : current,
+      );
+      setPendingFocusCommentId((current) =>
+        current === commentId ? null : current,
+      );
+    },
+    [],
+  );
+
   const removeSuggestionComments = useCallback(
     (changeId: string, currentEditor: Editor) => {
       const commentIdsToDelete = [...commentsRef.current.values()]
@@ -2038,11 +2063,18 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
                         hoveredCommentId={hoveredCommentId}
                         onDeleteComment={deleteComment}
                         onUpdateComment={(commentId, nextContent) => {
+                          const wasDraftComment =
+                            commentsRef.current.get(commentId)?.content.trim()
+                              .length === 0;
                           updateComment(commentId, (current) => ({
                             ...current,
                             content: nextContent,
                           }));
                           onCommentSubmit?.(commentId);
+                          closeSubmittedDraftComment(
+                            commentId,
+                            wasDraftComment,
+                          );
                         }}
                         onSelectComment={selectComment}
                         onHoverComment={setHoveredCommentId}
@@ -2080,11 +2112,14 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
             contentHeight={contentHeight}
             onDeleteComment={deleteComment}
             onUpdateComment={(commentId, nextContent) => {
+              const wasDraftComment =
+                commentsRef.current.get(commentId)?.content.trim().length === 0;
               updateComment(commentId, (current) => ({
                 ...current,
                 content: nextContent,
               }));
               onCommentSubmit?.(commentId);
+              closeSubmittedDraftComment(commentId, wasDraftComment);
             }}
             onSelectComment={selectComment}
             onFocusComment={focusComment}

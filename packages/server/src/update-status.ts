@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const defaultPackageJsonPath = path.resolve(__dirname, "../../../package.json");
-const DEFAULT_PACKAGE_NAME = "roughdraft";
+const DEFAULT_PACKAGE_NAME = "markdownmode";
 
 interface PackageManifest {
   name?: string;

@@ -29,7 +29,7 @@ describe("UpdateNotice", () => {
             currentVersion: "0.1.0",
             latestVersion: "0.2.0",
             updateAvailable: true,
-            updateCommand: "npm i -g roughdraft@latest",
+            updateCommand: "npm i -g markdownmode@latest",
           }}
         />,
       );

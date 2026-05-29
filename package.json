@@ -1,5 +1,5 @@
 {
-  "name": "roughdraft",
+  "name": "markdownmode",
   "version": "0.1.8",
   "description": "A local markdown review app",
   "license": "MIT",
@@ -9,7 +9,7 @@
     "url": "git+https://github.com/Lex-Inc/roughdraft.git"
   },
   "bin": {
-    "roughdraft": "./packages/server/bin/roughdraft.mjs"
+    "markdownmode": "./packages/server/bin/markdownmode.mjs"
   },
   "scripts": {
     "setup": "./scripts/setup.sh",
@@ -31,7 +31,7 @@
     "test:coverage": "corepack pnpm --filter @roughdraft/app exec vitest run --coverage && corepack pnpm --filter @roughdraft/server exec vitest run --coverage",
     "check": "corepack pnpm lint && corepack pnpm test:selectors && corepack pnpm test && corepack pnpm build",
     "build": "corepack pnpm --filter @roughdraft/rfm build && corepack pnpm --filter @roughdraft/app build && corepack pnpm --filter @roughdraft/server build",
-    "preview": "node packages/server/bin/roughdraft.mjs open README.md"
+    "preview": "node packages/server/bin/markdownmode.mjs open README.md"
   },
   "files": [
     "packages/app/dist",

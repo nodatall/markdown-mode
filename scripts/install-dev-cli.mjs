@@ -54,7 +54,7 @@ function parseArgs(argv) {
 }
 
 function printHelp(log = console.log) {
-  log("Install a per-worktree Roughdraft dev CLI wrapper.");
+  log("Install a per-worktree Markdown Mode dev CLI wrapper.");
   log("");
   log("Usage:");
   log("  pnpm dev:install-cli");
@@ -74,7 +74,7 @@ function getDefaultBinDir(env = process.env) {
 function buildDefaultStateDir(commandName, env = process.env) {
   const baseDir =
     env.ROUGHDRAFT_DEV_STATE_BASE_DIR ||
-    path.join(os.homedir(), ".roughdraft", "dev");
+    path.join(os.homedir(), ".markdownmode", "dev");
   return path.join(baseDir, commandName);
 }
 
@@ -87,7 +87,7 @@ function buildWrapperContent({
 }) {
   return [
     "#!/usr/bin/env bash",
-    `# roughdraft-dev-repo-root=${repoRoot}`,
+    `# markdownmode-dev-repo-root=${repoRoot}`,
     `if [[ -z "\${ROUGHDRAFT_STATE_DIR:-}" ]]; then export ROUGHDRAFT_STATE_DIR=${shellDoubleQuote(stateDir)}; fi`,
     `export ROUGHDRAFT_DEV_WRAPPER_NAME=${shellDoubleQuote(commandName)}`,
     `export ROUGHDRAFT_DEV_WRAPPER_PATH=${shellDoubleQuote(wrapperPath)}`,
@@ -103,7 +103,7 @@ function readExistingTarget(wrapperPath) {
   }
 
   const content = fs.readFileSync(wrapperPath, "utf8");
-  const match = content.match(/^# roughdraft-dev-repo-root=(.+)$/m);
+  const match = content.match(/^# markdownmode-dev-repo-root=(.+)$/m);
   return match?.[1] ?? null;
 }
 
@@ -118,9 +118,9 @@ export function installDevCli(options = {}) {
     "packages",
     "server",
     "bin",
-    "roughdraft.mjs",
+    "markdownmode.mjs",
   );
-  const commandName = `roughdraft-dev-${suffix}`;
+  const commandName = `markdownmode-dev-${suffix}`;
   const stateDir = options.stateDir ?? buildDefaultStateDir(commandName, env);
   const wrapperPath = path.join(binDir, commandName);
   const wrapperContent = buildWrapperContent({

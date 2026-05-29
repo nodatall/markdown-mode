@@ -230,7 +230,7 @@ function pageFilePathFromId(projectDir: string, id: string): string | null {
 }
 
 function nextAssetPath(projectDir: string, filename: string): string {
-  const assetsDir = path.join(projectDir, ".roughdraft-assets");
+  const assetsDir = path.join(projectDir, ".markdownmode-assets");
   fs.mkdirSync(assetsDir, { recursive: true });
 
   const safeName = sanitizeFilename(filename);
@@ -242,7 +242,7 @@ function nextAssetPath(projectDir: string, filename: string): string {
   let counter = 0;
   while (true) {
     const suffix = counter === 0 ? "" : `-${counter}`;
-    const relativePath = `.roughdraft-assets/${basename}${suffix}${extension}`;
+    const relativePath = `.markdownmode-assets/${basename}${suffix}${extension}`;
     const absolutePath = path.join(projectDir, relativePath);
     if (!fs.existsSync(absolutePath)) {
       return relativePath;

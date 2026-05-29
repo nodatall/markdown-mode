@@ -7,7 +7,9 @@ import { installDevCli } from "../../../scripts/install-dev-cli.mjs";
 const tempDirs: string[] = [];
 
 function createFixtureRepo(basename = "lyon-v2") {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "roughdraft-dev-cli-"));
+  const tempDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "markdownmode-dev-cli-"),
+  );
   tempDirs.push(tempDir);
 
   const repoRoot = path.join(tempDir, basename);
@@ -16,7 +18,7 @@ function createFixtureRepo(basename = "lyon-v2") {
     "packages",
     "server",
     "bin",
-    "roughdraft.mjs",
+    "markdownmode.mjs",
   );
 
   fs.mkdirSync(path.dirname(cliEntryPath), { recursive: true });
@@ -48,18 +50,20 @@ describe("installDevCli", () => {
     const mode = fs.statSync(result.wrapperPath).mode & 0o777;
     const expectedStateDir = path.join(
       os.homedir(),
-      ".roughdraft",
+      ".markdownmode",
       "dev",
-      "roughdraft-dev-lyon-v2",
+      "markdownmode-dev-lyon-v2",
     );
 
-    expect(result.commandName).toBe("roughdraft-dev-lyon-v2");
-    expect(wrapperContent).toContain(`# roughdraft-dev-repo-root=${repoRoot}`);
+    expect(result.commandName).toBe("markdownmode-dev-lyon-v2");
+    expect(wrapperContent).toContain(
+      `# markdownmode-dev-repo-root=${repoRoot}`,
+    );
     expect(wrapperContent).toContain(
       `if [[ -z "\${ROUGHDRAFT_STATE_DIR:-}" ]]; then export ROUGHDRAFT_STATE_DIR="${expectedStateDir}"; fi`,
     );
     expect(wrapperContent).toContain(
-      'export ROUGHDRAFT_DEV_WRAPPER_NAME="roughdraft-dev-lyon-v2"',
+      'export ROUGHDRAFT_DEV_WRAPPER_NAME="markdownmode-dev-lyon-v2"',
     );
     expect(wrapperContent).toContain(
       `export ROUGHDRAFT_DEV_WRAPPER_PATH="${result.wrapperPath}"`,
@@ -68,7 +72,7 @@ describe("installDevCli", () => {
       `export ROUGHDRAFT_DEV_WRAPPER_REPO_ROOT="${repoRoot}"`,
     );
     expect(wrapperContent).toContain(
-      `exec node "${path.join(repoRoot, "packages", "server", "bin", "roughdraft.mjs")}" "$@"`,
+      `exec node "${path.join(repoRoot, "packages", "server", "bin", "markdownmode.mjs")}" "$@"`,
     );
     expect(mode).toBe(0o755);
     expect(result.stateDir).toBe(expectedStateDir);
@@ -86,7 +90,7 @@ describe("installDevCli", () => {
       warn: () => {},
     });
 
-    expect(result.commandName).toBe("roughdraft-dev-api-redesign");
+    expect(result.commandName).toBe("markdownmode-dev-api-redesign");
   });
 
   it("warns when overwriting a wrapper for a different repo", () => {
@@ -112,7 +116,7 @@ describe("installDevCli", () => {
     });
 
     expect(warnings).toContain(
-      `Overwrote existing roughdraft-dev-shared wrapper that previously pointed to ${firstRepo}.`,
+      `Overwrote existing markdownmode-dev-shared wrapper that previously pointed to ${firstRepo}.`,
     );
   });
 

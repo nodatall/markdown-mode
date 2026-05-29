@@ -96,7 +96,7 @@ export function shouldWarnBeforeUnload({
 }
 
 const AGENT_SETUP_PROMPT =
-  "Install Roughdraft for me using `npm i -g roughdraft`, then read https://roughdraft.md/setup.md and set yourself up to use it.";
+  "Install Markdown Mode for me using `npm i -g markdownmode`, then read https://roughdraft.md/setup.md and set yourself up to use it.";
 const PREVIEW_DOCUMENT_PATH = "preview.md";
 const PREVIEW_INITIAL_MARKDOWN = [
   "# Live Preview",
@@ -423,8 +423,8 @@ export function Homepage({
                   <DialogHeader>
                     <DialogTitle>Give this to your coding agent</DialogTitle>
                     <DialogDescription>
-                      This prompt tells the agent how to install Roughdraft and
-                      set up the review workflow.
+                      This prompt tells the agent how to install Markdown Mode
+                      and set up the review workflow.
                     </DialogDescription>
                   </DialogHeader>
 
@@ -696,7 +696,7 @@ function AgentChatMock({
           data-terminal-line-visible={showRoughdraftCommand ? "true" : "false"}
           data-testid="homepage-workflow-terminal-command"
         >
-          roughdraft open "/workspace/.context/homepage-conversion-plan.md"
+          markdownmode open "/workspace/.context/homepage-conversion-plan.md"
           <div className="mt-2 text-slate-400">Waiting for I'm done...</div>
         </div>
 

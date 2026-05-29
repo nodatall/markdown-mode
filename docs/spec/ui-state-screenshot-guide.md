@@ -1,5 +1,5 @@
-# Roughdraft UI State Screenshot Guide
-This file is a reusable checklist for capturing Roughdraft's major UI states. It is meant to support periodic visual review, not to replace automated tests.
+# Markdown Mode UI State Screenshot Guide
+This file is a reusable checklist for capturing Markdown Mode's major UI states. It is meant to support periodic visual review, not to replace automated tests.
 ## Screenshot Folder Convention
 Put each run in a timestamped {==directory==}{>>123<<}{id="c3" by="user" at="2026-05-24T03:59:40.547Z"}:
 
@@ -38,11 +38,11 @@ For local file backend states, use the worktree-specific CLI wrapper:
 ```bash
 worktree_root="$(git rev-parse --show-toplevel)"
 worktree_name="$(basename "$worktree_root")"
-roughdraft_cmd="roughdraft-dev-$worktree_name"
+markdownmode_cmd="markdownmode-dev-$worktree_name"
 
-command -v "$roughdraft_cmd" >/dev/null || pnpm dev:install-cli
-"$roughdraft_cmd" start
-"$roughdraft_cmd" open "$worktree_root/.context/ui-state-fixtures/review.md" --print-url --no-open --detached
+command -v "$markdownmode_cmd" >/dev/null || pnpm dev:install-cli
+"$markdownmode_cmd" start
+"$markdownmode_cmd" open "$worktree_root/.context/ui-state-fixtures/review.md" --print-url --no-open --detached
 ```
 ## Fixture Documents
 Create these under `.context/ui-state-fixtures/` when a capture run needs stable local-file states.
@@ -75,7 +75,7 @@ Paragraph with **bold**, [link](https://example.com), `inline code`.
 | Homepage | Install dialog | Click the install CTA | Base UI dialog content | Include the terminal command and close affordance. |
 | Homepage | Workflow stage 1 | Scroll storyboard to first scene | `homepage-workflow-terminal`, `homepage-workflow-scene` | User request visible; agent work and popup are hidden. |
 | Homepage | Workflow stage 2 | Scroll to second scene | `homepage-workflow-agent-work` | Agent work becomes visible. |
-| Homepage | Workflow stage 3 | Scroll to third scene | `homepage-workflow-terminal-command`, `homepage-workflow-popup` | Roughdraft command and document popup are visible. |
+| Homepage | Workflow stage 3 | Scroll to third scene | `homepage-workflow-terminal-command`, `homepage-workflow-popup` | Markdown Mode command and document popup are visible. |
 | Homepage | Workflow stage 4 | Scroll to fourth scene | `homepage-workflow-review-rail`, `homepage-workflow-comment-highlight` | User feedback appears in the document/review rail. |
 | Homepage | Workflow stage 5 | Scroll to fifth scene | `homepage-workflow-handoff-button` | Done handoff button is visible. |
 | Homepage | Workflow stage 6 | Scroll to final scene | `homepage-workflow-agent-resume` | Agent resume line and incorporated plan are visible; done button is hidden. |
@@ -113,7 +113,7 @@ Paragraph with **bold**, [link](https://example.com), `inline code`.
 | Comment editor | Comment editing | Open a comment card | `comment-rail-root-editor` | Comment test IDs follow `comment-${variant}-${id}-...`. |
 | Code mode | Review rail present | Open review fixture with `?editor=code` | `page-card-code`, `markdown-code-editor` | Confirms code editor and rail can coexist. |
 | Code mode | Review rail absent | Open fenced fixture with `?editor=code` | `page-card-code`, `markdown-code-editor` | Confirms fenced CriticMarkup alone does not create review rail. |
-| Error/home fallback | Non-Markdown path | Open URL with `?path=/tmp/file.txt` | homepage error message | Copy: `Roughdraft now opens one .md file at a time.` |
+| Error/home fallback | Non-Markdown path | Open URL with `?path=/tmp/file.txt` | homepage error message | Copy: `Markdown Mode now opens one .md file at a time.` |
 | Error/home fallback | Missing/unloadable path | Open URL with invalid markdown path through local backend | homepage error message | Captures load-error homepage variant. |
 ## Playwright Capture Skeleton ```ts import { chromium, devices } from "playwright";
 const baseUrl = process.env.ROUGHDRAFT_BASE_URL ?? "[http://127.0.0.1:5173](http://127.0.0.1:5173)"; const outDir = process.env.ROUGHDRAFT_SCREENSHOT_DIR ?? ".context/ui-state-screenshots/manual";

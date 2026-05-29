@@ -82,7 +82,7 @@ describe("cli", () => {
   );
 
   beforeEach(() => {
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "roughdraft-cli-"));
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "markdownmode-cli-"));
     stateDir = path.join(tempDir, "state");
     projectDir = path.join(tempDir, "project");
     devFrontendStateFile = path.join(tempDir, "dev-frontend.json");
@@ -107,11 +107,11 @@ describe("cli", () => {
 
   async function noUpdateStatus() {
     return {
-      packageName: "roughdraft",
+      packageName: "markdownmode",
       currentVersion: "0.1.0",
       latestVersion: "0.1.0",
       updateAvailable: false,
-      updateCommand: "npm i -g roughdraft@latest",
+      updateCommand: "npm i -g markdownmode@latest",
     };
   }
 
@@ -255,17 +255,17 @@ describe("cli", () => {
     const exitCode = await runCli(["open", documentPath, "--no-watch"], {
       ...test.deps,
       resolveUpdateStatus: async () => ({
-        packageName: "roughdraft",
+        packageName: "markdownmode",
         currentVersion: "0.1.1",
         latestVersion: "0.1.3",
         updateAvailable: true,
-        updateCommand: "npm i -g roughdraft@latest",
+        updateCommand: "npm i -g markdownmode@latest",
       }),
     });
 
     expect(exitCode).toBe(0);
     expect(test.logs.at(-1)).toBe(
-      "Roughdraft update available: 0.1.1 -> 0.1.3. Run `npm i -g roughdraft@latest` to update.",
+      "Markdown Mode update available: 0.1.1 -> 0.1.3. Run `npm i -g markdownmode@latest` to update.",
     );
   });
 
@@ -279,11 +279,11 @@ describe("cli", () => {
       {
         ...test.deps,
         resolveUpdateStatus: async () => ({
-          packageName: "roughdraft",
+          packageName: "markdownmode",
           currentVersion: "0.1.1",
           latestVersion: "0.1.3",
           updateAvailable: true,
-          updateCommand: "npm i -g roughdraft@latest",
+          updateCommand: "npm i -g markdownmode@latest",
         }),
       },
     );
@@ -796,11 +796,11 @@ describe("cli", () => {
     expect(statusExitCode).toBe(1);
     expect(fs.existsSync(getServerStateFilePath(test.deps.env))).toBeFalsy();
     expect(test.logs).toContain(
-      "Roughdraft is not running. Start it with `roughdraft start`.",
+      "Markdown Mode is not running. Start it with `markdownmode start`.",
     );
   });
 
-  it("returns successful JSON status when Roughdraft is not running", async () => {
+  it("returns successful JSON status when Markdown Mode is not running", async () => {
     const test = createTestDependencies();
 
     const exitCode = await runCli(["status", "--json"], test.deps);
@@ -816,7 +816,7 @@ describe("cli", () => {
     });
   });
 
-  it("emits JSON from status when Roughdraft is running", async () => {
+  it("emits JSON from status when Markdown Mode is running", async () => {
     const test = createTestDependencies();
     const result = await ensureServerRunning(test.deps, { projectDir });
 
@@ -1081,7 +1081,7 @@ describe("cli", () => {
     expect(statusExitCode).toBe(0);
     expect(openExitCode).toBe(0);
     expect(logs).toContain(
-      `Roughdraft is running at http://localhost:${ROUGHDRAFT_DEFAULT_PORT}`,
+      `Markdown Mode is running at http://localhost:${ROUGHDRAFT_DEFAULT_PORT}`,
     );
     expect(logs).toContain(
       `This server is not managed by ${getServerStateFilePath(deps.env)}.`,
@@ -1097,12 +1097,12 @@ describe("cli", () => {
     expect(exitCode).toBe(1);
     expect(test.getSpawnCount()).toBe(0);
     expect(test.errors).toContain(
-      `Roughdraft can only open .md files: ${projectDir}`,
+      `Markdown Mode can only open .md files: ${projectDir}`,
     );
     expect(test.getLastOpenedUrl()).toBeNull();
   });
 
-  it("cleans stale state and warns when another Roughdraft instance owns the port during stop", async () => {
+  it("cleans stale state and warns when another Markdown Mode instance owns the port during stop", async () => {
     const errors: string[] = [];
     const stateFilePath = path.join(stateDir, "server.json");
 
@@ -1167,7 +1167,7 @@ describe("cli", () => {
 
     expect(stopExitCode).toBe(1);
     expect(errors).toContain(
-      `Stopped tracked Roughdraft process 424242, but another Roughdraft instance is still running at http://localhost:${ROUGHDRAFT_DEFAULT_PORT}.`,
+      `Stopped tracked Markdown Mode process 424242, but another Markdown Mode instance is still running at http://localhost:${ROUGHDRAFT_DEFAULT_PORT}.`,
     );
     expect(fs.existsSync(stateFilePath)).toBeFalsy();
   });
@@ -1233,7 +1233,7 @@ describe("cli", () => {
     expect(exitCode).toBe(0);
     expect(stoppedPid).toBe(4242);
     expect(logs).toContain(
-      `Stopped unmanaged Roughdraft at http://localhost:${ROUGHDRAFT_DEFAULT_PORT}.`,
+      `Stopped unmanaged Markdown Mode at http://localhost:${ROUGHDRAFT_DEFAULT_PORT}.`,
     );
   });
 
@@ -1245,7 +1245,7 @@ describe("cli", () => {
     expect(exitCode).toBe(0);
     expect(test.logs).toContain("When adding new review feedback:");
     expect(test.logs).toContain(
-      '  Prefer the extended Roughdraft format with `id`, `by`, and `at` metadata, for example {>>Comment<<}{id="c1" by="AI" at="2026-04-28T12:00:00.000Z"}.',
+      '  Prefer the extended Markdown Mode format with `id`, `by`, and `at` metadata, for example {>>Comment<<}{id="c1" by="AI" at="2026-04-28T12:00:00.000Z"}.',
     );
     expect(test.logs).toContain(
       "  Use `c1`, `c2`, etc. for comment ids and `s1`, `s2`, etc. for suggested-change ids.",
@@ -1283,7 +1283,7 @@ describe("cli", () => {
     );
     expect(test.logs).toContain("Agent setup: https://roughdraft.md/setup.md");
     expect(test.logs).toContain(
-      "Use `roughdraft help agent` for a copyable setup prompt.",
+      "Use `markdownmode help agent` for a copyable setup prompt.",
     );
   });
 
@@ -1297,7 +1297,7 @@ describe("cli", () => {
       "To set up your coding agent, paste this into it:",
     );
     expect(test.logs).toContain(
-      "Install Roughdraft for me using `npm i -g roughdraft`, then read https://roughdraft.md/setup.md and set yourself up to use it.",
+      "Install Markdown Mode for me using `npm i -g markdownmode`, then read https://roughdraft.md/setup.md and set yourself up to use it.",
     );
     expect(test.logs).toContain(
       "This command only prints setup text. It does not edit agent instruction files.",
@@ -1341,7 +1341,7 @@ describe("cli", () => {
 
     expect(exitCode).toBe(0);
     expect(test.logs).toContain(
-      "  roughdraft open <path> [--no-open] [--watch] [--print-url] [--port <port>]",
+      "  markdownmode open <path> [--no-open] [--watch] [--print-url] [--port <port>]",
     );
     expect(test.logs).toContain(
       "  --watch              Wait for the legacy Done Reviewing event",
@@ -1361,7 +1361,7 @@ describe("cli", () => {
     const exitCode = await runCli(["doctor", "--help"], test.deps);
 
     expect(exitCode).toBe(0);
-    expect(test.logs).toContain("  roughdraft doctor [path] [--json]");
+    expect(test.logs).toContain("  markdownmode doctor [path] [--json]");
   });
 
   it("rejects unknown command typos with suggestions", async () => {
@@ -1388,18 +1388,18 @@ describe("cli", () => {
 
   it("reports dev wrapper metadata from doctor --json", async () => {
     const logs: string[] = [];
-    const wrapperPath = path.join(tempDir, "bin", "roughdraft-dev-lyon-v2");
+    const wrapperPath = path.join(tempDir, "bin", "markdownmode-dev-lyon-v2");
     const devStateDir = path.join(
       tempDir,
-      ".roughdraft",
+      ".markdownmode",
       "dev",
-      "roughdraft-dev-lyon-v2",
+      "markdownmode-dev-lyon-v2",
     );
     const deps = createCliDependencies({
       env: {
         ...process.env,
         CODEX_THREAD_ID: "",
-        ROUGHDRAFT_DEV_WRAPPER_NAME: "roughdraft-dev-lyon-v2",
+        ROUGHDRAFT_DEV_WRAPPER_NAME: "markdownmode-dev-lyon-v2",
         ROUGHDRAFT_DEV_WRAPPER_PATH: wrapperPath,
         ROUGHDRAFT_DEV_WRAPPER_REPO_ROOT: serverRoot,
         ROUGHDRAFT_STATE_DIR: devStateDir,
@@ -1425,7 +1425,7 @@ describe("cli", () => {
 
     expect(exitCode).toBe(0);
     expect(payload.devWrapper).toEqual({
-      commandName: "roughdraft-dev-lyon-v2",
+      commandName: "markdownmode-dev-lyon-v2",
       path: wrapperPath,
       repoRoot: serverRoot,
       repoRootMatches: true,
@@ -1444,7 +1444,7 @@ describe("cli", () => {
     const exitCode = await runCli(["doctor", documentPath], test.deps);
 
     expect(exitCode).toBe(0);
-    expect(test.logs).toContain("Roughdraft Markdown doctor: draft.md");
+    expect(test.logs).toContain("Markdown Mode Markdown doctor: draft.md");
     expect(test.logs).toContain("Status: passed");
     expect(test.logs).toContain("Found 1 comment(s) and 0 suggestion(s).");
   });
@@ -1519,7 +1519,7 @@ describe("cli", () => {
 
     expect(exitCode).toBe(2);
     expect(test.errors).toContain(
-      `Roughdraft doctor can only validate .md files: ${documentPath}`,
+      `Markdown Mode doctor can only validate .md files: ${documentPath}`,
     );
   });
 
@@ -1620,7 +1620,9 @@ describe("runCli open in remote mode", () => {
   let projectDir: string;
 
   beforeEach(() => {
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "roughdraft-cli-remote-"));
+    tempDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "markdownmode-cli-remote-"),
+    );
     projectDir = path.join(tempDir, "project");
     fs.mkdirSync(projectDir, { recursive: true });
   });
@@ -1670,7 +1672,7 @@ describe("runCli open in remote mode", () => {
       error: (m) => errors.push(m),
       openUrl: () => "disabled",
       resolveUpdateStatus: async () => ({
-        packageName: "roughdraft",
+        packageName: "markdownmode",
         currentVersion: "0.1.0",
         latestVersion: "0.1.0",
         updateAvailable: false,
@@ -1700,7 +1702,7 @@ describe("runCli open in remote mode", () => {
         return new Response("", { status: 200 });
       },
       resolveUpdateStatus: async () => ({
-        packageName: "roughdraft",
+        packageName: "markdownmode",
         currentVersion: "0.1.0",
         latestVersion: "0.1.0",
         updateAvailable: false,
@@ -1735,7 +1737,7 @@ describe("runCli open in remote mode", () => {
           return "disabled";
         },
         resolveUpdateStatus: async () => ({
-          packageName: "roughdraft",
+          packageName: "markdownmode",
           currentVersion: "0.1.0",
           latestVersion: "0.1.0",
           updateAvailable: false,
@@ -1783,7 +1785,7 @@ describe("runCli open in remote mode", () => {
       const exitCode = await cliPromise;
       expect(exitCode).toBe(0);
       expect(
-        logs.some((m) => m.includes("Opened remote Roughdraft session")),
+        logs.some((m) => m.includes("Opened remote Markdown Mode session")),
       ).toBe(true);
     } finally {
       await remote.close();
@@ -1815,7 +1817,7 @@ describe("runCli open in remote mode", () => {
           return "disabled";
         },
         resolveUpdateStatus: async () => ({
-          packageName: "roughdraft",
+          packageName: "markdownmode",
           currentVersion: "0.1.0",
           latestVersion: "0.1.0",
           updateAvailable: false,
@@ -1862,7 +1864,7 @@ describe("runCli open in remote mode", () => {
       expect(await cliPromise).toBe(0);
       expect(errors).toEqual([]);
       expect(
-        logs.some((m) => m.includes("Opened remote Roughdraft session")),
+        logs.some((m) => m.includes("Opened remote Markdown Mode session")),
       ).toBe(true);
     } finally {
       await remote.close();
@@ -1923,7 +1925,7 @@ describe("runCli open in remote mode", () => {
           return "disabled";
         },
         resolveUpdateStatus: async () => ({
-          packageName: "roughdraft",
+          packageName: "markdownmode",
           currentVersion: "0.1.0",
           latestVersion: "0.1.0",
           updateAvailable: false,
@@ -2009,7 +2011,7 @@ describe("runCli open in remote mode", () => {
           return "disabled";
         },
         resolveUpdateStatus: async () => ({
-          packageName: "roughdraft",
+          packageName: "markdownmode",
           currentVersion: "0.1.0",
           latestVersion: "0.1.0",
           updateAvailable: false,
@@ -2079,7 +2081,7 @@ describe("runCli open in remote mode", () => {
       expect(await cliPromise).toBe(0);
       expect(errors).toEqual([]);
       expect(
-        logs.some((m) => m.includes("Opened remote Roughdraft session")),
+        logs.some((m) => m.includes("Opened remote Markdown Mode session")),
       ).toBe(true);
     } finally {
       await browserEventsReader?.cancel().catch(() => undefined);

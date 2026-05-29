@@ -2,15 +2,15 @@
 
 set -euo pipefail
 
-PACKAGE_SPEC="${ROUGHDRAFT_PACKAGE_SPEC:-roughdraft@latest}"
+PACKAGE_SPEC="${MARKDOWNMODE_PACKAGE_SPEC:-markdownmode@latest}"
 
 log() {
-  printf '[roughdraft-install] %s\n' "$1"
+  printf '[markdownmode-install] %s\n' "$1"
 }
 
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
-    printf 'roughdraft installer error: missing required command `%s`\n' "$1" >&2
+    printf 'markdownmode installer error: missing required command `%s`\n' "$1" >&2
     exit 1
   fi
 }

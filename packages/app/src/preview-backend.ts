@@ -19,7 +19,7 @@ function nextAssetPath(assets: Map<string, string>, filename: string): string {
 
   while (true) {
     const suffix = counter === 0 ? "" : `-${counter}`;
-    const path = `./.roughdraft-preview-assets/${basename}${suffix}${extension}`;
+    const path = `./.markdownmode-preview-assets/${basename}${suffix}${extension}`;
     if (!assets.has(path)) return path;
     counter += 1;
   }

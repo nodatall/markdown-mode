@@ -105,6 +105,9 @@ test.describe("CriticMarkup review flows", () => {
       .getByTestId("comment-rail-c1-editor")
       .fill("Clarify this phrase.");
     await page.getByTestId("comment-rail-c1-action-save").click();
+    await expect(page.getByTestId("comment-rail-c1-editor")).toHaveCount(0);
+    await page.mouse.click(12, 12);
+    await expect(page.getByTestId("comment-rail-c1-editor")).toHaveCount(0);
 
     await expect
       .poll(() => readProjectFile(projectDir, "new-comment.md"))

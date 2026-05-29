@@ -50,7 +50,7 @@ export function RemoteSessionBanner({ backend }: RemoteSessionBannerProps) {
         </div>
         <div className="mt-0.5 text-xs leading-5 text-amber-900 dark:text-amber-200">
           The CLI on the source machine is no longer connected. Reopen
-          <span className="font-mono"> roughdraft open </span>
+          <span className="font-mono"> markdownmode open </span>
           from that machine to keep editing.
         </div>
       </div>

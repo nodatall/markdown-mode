@@ -1,4 +1,4 @@
-# Roughdraft
+# Markdown Mode
 A local-first markdown editor and viewer for working with AI.
 
 {==Open one markdown file on your machine. Review it, comment on it, and suggest edits.==}{>>What does this mean?<<}{id="c1" by="user" at="2026-04-30T20:18:51.163Z"}
@@ -6,25 +6,25 @@ A local-first markdown editor and viewer for working with AI.
 Paste this into your coding agent:
 
 ```text
-Install Roughdraft for me using `npm i -g roughdraft`, then read https://roughdraft.md/setup.md and set yourself up to use it.
+Install Markdown Mode for me using `npm i -g markdownmode`, then read https://roughdraft.md/setup.md and set yourself up to use it.
 ```
 
 Or install and open a file yourself:
 
 ```bash
-npm i -g roughdraft
-roughdraft open /absolute/path/to/file.md
+npm i -g markdownmode
+markdownmode open /absolute/path/to/file.md
 ```
 ## What is this?
-Roughdraft is a local-first markdown editor and viewer that runs on your computer.
+Markdown Mode is a local-first markdown editor and viewer that runs on your computer.
 
 Its job is to make markdown files easy to open, read, edit, review, and discuss with your AI agent without moving them into a proprietary format or a hosted app.
 
-Roughdraft opens a single markdown file directly for CriticMarkup comments and suggested changes.
+Markdown Mode opens a single markdown file directly for CriticMarkup comments and suggested changes.
 ## How it works
 - **Local-first markdown editor** — Open normal `.md` files from your machine and edit them directly
   
-- **Works with your AI agent** — Tell your local agent to open a file in Roughdraft on your computer, then keep collaborating from there
+- **Works with your AI agent** — Tell your local agent to open a file in Markdown Mode on your computer, then keep collaborating from there
   
 - **Comments & suggested changes** — Use CriticMarkup for inline feedback, revisions, and review conversations
   
@@ -33,38 +33,38 @@ Roughdraft opens a single markdown file directly for CriticMarkup comments and s
 - **No cloud, no account, no telemetry** — Runs entirely on your machine
   
 ## Quick start
-Install Roughdraft and start the local server:
+Install Markdown Mode and start the local server:
 
 ```bash
-npm i -g roughdraft
-roughdraft start
+npm i -g markdownmode
+markdownmode start
 ```
 
-`roughdraft start` runs Roughdraft in the background, reuses or chooses a free localhost port, writes server state to `~/.roughdraft/server.json`, prints the active URL, and exits while the server keeps running.
+`markdownmode start` runs Markdown Mode in the background, reuses or chooses a free localhost port, writes server state to `~/.markdownmode/server.json`, prints the active URL, and exits while the server keeps running.
 
 Open a specific markdown file:
 
 ```bash
-roughdraft open ./path/to/my-essay/draft.md
+markdownmode open ./path/to/my-essay/draft.md
 ```
 
 For scripts and agents that need a URL without launching a browser:
 
 ```bash
-roughdraft open ./path/to/my-essay/draft.md --print-url
-roughdraft status --json
+markdownmode open ./path/to/my-essay/draft.md --print-url
+markdownmode status --json
 ```
 
 Check or stop the background server:
 
 ```bash
-roughdraft status
-roughdraft stop
+markdownmode status
+markdownmode stop
 ```
 
-`roughdraft open` will reuse the running server and auto-start it if needed. You can also use `roughdraft ./path/to/file.md` as a shortcut when the input clearly looks like a path.
+`markdownmode open` will reuse the running server and auto-start it if needed. You can also use `markdownmode ./path/to/file.md` as a shortcut when the input clearly looks like a path.
 
-Roughdraft does not edit `~/CLAUDE.md`, `~/AGENTS.md`, or other user-level agent files. The setup prompt asks your agent to update its own guidance.
+Markdown Mode does not edit `~/CLAUDE.md`, `~/AGENTS.md`, or other user-level agent files. The setup prompt asks your agent to update its own guidance.
 
 If the local server is already running, you can also open a file directly by URL:
 
@@ -76,28 +76,28 @@ That makes an agent-friendly workflow possible:
 
 1. Your AI writes or updates markdown files on disk.
   
-2. You tell it to open a markdown file in Roughdraft.
+2. You tell it to open a markdown file in Markdown Mode.
   
-3. Roughdraft opens locally on your machine.
+3. Markdown Mode opens locally on your machine.
   
 4. You read, edit, leave comments, and suggest changes.
   
-5. When you submit a comment, Roughdraft saves that comment and sends that specific request to the configured agent workflow. If no agent adapter is available, use the copy-prompt button to paste the feedback into an agent yourself.
+5. When you submit a comment, Markdown Mode saves that comment and sends that specific request to the configured agent workflow. If no agent adapter is available, use the copy-prompt button to paste the feedback into an agent yourself.
   
 
 The normal open command returns after opening the file:
 
 ```bash
-roughdraft open ./path/to/my-essay/draft.md --json
+markdownmode open ./path/to/my-essay/draft.md --json
 ```
 
-`roughdraft open` starts or reuses the local server, opens the document, and returns control to the caller. If `CODEX_THREAD_ID` is present, Roughdraft passes it as transient session context so submitted comments can be associated with that origin thread. Use `--detached` to ignore that environment value, or `--origin-thread-id <id>` to pass one explicitly.
+`markdownmode open` starts or reuses the local server, opens the document, and returns control to the caller. If `CODEX_THREAD_ID` is present, Markdown Mode passes it as transient session context so submitted comments can be associated with that origin thread. Use `--detached` to ignore that environment value, or `--origin-thread-id <id>` to pass one explicitly.
 
 The old blocking review-event flow remains available for compatibility:
 
 ```bash
-roughdraft open ./path/to/my-essay/draft.md --watch --json
-roughdraft watch ./path/to/my-essay/draft.md --json
+markdownmode open ./path/to/my-essay/draft.md --watch --json
+markdownmode watch ./path/to/my-essay/draft.md --json
 ```
 
 `--watch` waits for a legacy `review.completed` event. New agent-comment task endpoints are the primary product path.
@@ -105,7 +105,7 @@ roughdraft watch ./path/to/my-essay/draft.md --json
 Experimental MCP clients can start the stdio server with:
 
 ```bash
-roughdraft mcp
+markdownmode mcp
 ```
 
 The MCP server exposes tools to read the review index, list pending feedback, watch review events, use legacy reply helpers, and mark items resolved. CriticMarkup in the Markdown file remains the durable source of truth.
@@ -121,9 +121,9 @@ The two scripts coordinate through a lock file, so it's safe to start `./scripts
 
 If you prefer package scripts, the same commands are available as `pnpm setup` and `pnpm start`.
 
-Running `pnpm setup` also installs a per-worktree dev CLI wrapper into `~/.local/bin` by default, using the current worktree directory name. For example, this checkout might install `roughdraft-dev-lyon-v2`, which points at this worktree's local code while leaving the published global `roughdraft` command untouched.
+Running `pnpm setup` also installs a per-worktree dev CLI wrapper into `~/.local/bin` by default, using the current worktree directory name. For example, this checkout might install `markdownmode-dev-lyon-v2`, which points at this worktree's local code while leaving the published global `markdownmode` command untouched.
 
-Each dev wrapper keeps its own server state under `~/.roughdraft/dev/<wrapper-name>` by default, so opening a file from one worktree will not accidentally reuse a backend started from another worktree. `roughdraft-dev-<worktree> open ...` can start its own background server as needed; you do not need to run `pnpm dev` first just to open files in Roughdraft.
+Each dev wrapper keeps its own server state under `~/.markdownmode/dev/<wrapper-name>` by default, so opening a file from one worktree will not accidentally reuse a backend started from another worktree. `markdownmode-dev-<worktree> open ...` can start its own background server as needed; you do not need to run `pnpm dev` first just to open files in Markdown Mode.
 
 You can refresh that wrapper manually with:
 
@@ -142,7 +142,7 @@ pnpm check
 
 `pnpm check` is the same command the pull request workflow runs before merge.
 ## Publishing
-Roughdraft publishes from `main` when the root `package.json` version is newer than the current npm `latest` version.
+Markdown Mode publishes from `main` when the root `package.json` version is newer than the current npm `latest` version.
 
 Release flow:
 
@@ -169,19 +169,19 @@ my-essay/
   draft-2.md            # Another file you can open separately
 ```
 
-Roughdraft reads and writes the markdown file directly.
+Markdown Mode reads and writes the markdown file directly.
 ## Agent setup
-If you want your local agent to remember the Roughdraft workflow, ask it to read the live setup prompt:
+If you want your local agent to remember the Markdown Mode workflow, ask it to read the live setup prompt:
 
 ```text
-Install Roughdraft for me using `npm i -g roughdraft`, then read https://roughdraft.md/setup.md and set yourself up to use it.
+Install Markdown Mode for me using `npm i -g markdownmode`, then read https://roughdraft.md/setup.md and set yourself up to use it.
 ```
 
-Use `roughdraft help`, `roughdraft help agent`, or `roughdraft help criticmarkup` if you need a local refresher.
+Use `markdownmode help`, `markdownmode help agent`, or `markdownmode help criticmarkup` if you need a local refresher.
 ## CLI reference
 ```text
-roughdraft [flags] <command> [args]
-roughdraft <path>
+markdownmode [flags] <command> [args]
+markdownmode <path>
 ```
 
 Commands:
@@ -212,22 +212,22 @@ Global flags:
 Useful command flags:
 
 ```text
-roughdraft open <path> --no-open
-roughdraft open <path> --print-url
-roughdraft open <path> --json
-roughdraft open <path> --watch
-roughdraft open <path> --detached
-roughdraft open <path> --origin-thread-id <id>
-roughdraft start --port <port>
-roughdraft status --json
-roughdraft stop --all
-roughdraft watch ./draft.md --json
-roughdraft doctor --json
-roughdraft doctor ./draft.md
-roughdraft doctor ./draft.md --json
+markdownmode open <path> --no-open
+markdownmode open <path> --print-url
+markdownmode open <path> --json
+markdownmode open <path> --watch
+markdownmode open <path> --detached
+markdownmode open <path> --origin-thread-id <id>
+markdownmode start --port <port>
+markdownmode status --json
+markdownmode stop --all
+markdownmode watch ./draft.md --json
+markdownmode doctor --json
+markdownmode doctor ./draft.md
+markdownmode doctor ./draft.md --json
 ```
 
-Usage errors return exit code `2`. Runtime failures return exit code `1`. `roughdraft status --json` returns exit code `0` even when the JSON says `"running": false`.
+Usage errors return exit code `2`. Runtime failures return exit code `1`. `markdownmode status --json` returns exit code `0` even when the JSON says `"running": false`.
 
 Supported environment variables:
 
@@ -259,7 +259,7 @@ ROUGHDRAFT_DEV_WRAPPER_PATH
 ROUGHDRAFT_DEV_WRAPPER_REPO_ROOT
 ```
 ## Roughdraft-flavored CriticMarkup
-Roughdraft uses [CriticMarkup](https://criticmarkup.com) as the readable review layer inside normal Markdown files. It supports the standard markers for comments, highlights, insertions, deletions, and substitutions:
+Markdown Mode uses [CriticMarkup](https://criticmarkup.com) as the readable review layer inside normal Markdown files. It supports the standard markers for comments, highlights, insertions, deletions, and substitutions:
 
 The canonical Roughdraft Flavored Markdown spec is published at [roughdraft.md/spec/roughdraft-flavored-markdown.md](https://roughdraft.md/spec/roughdraft-flavored-markdown.md). The review-index JSON Schema is published at [roughdraft.md/spec/roughdraft-flavored-markdown.schema.json](https://roughdraft.md/spec/roughdraft-flavored-markdown.schema.json).
 
@@ -271,7 +271,7 @@ This is {>>a comment<<} in the margin.
 This is {==highlighted==} text.
 ```
 
-Roughdraft extends those markers with compact attribute blocks so review state can round-trip through the file. Attribute blocks are written immediately after the comment or suggestion:
+Markdown Mode extends those markers with compact attribute blocks so review state can round-trip through the file. Attribute blocks are written immediately after the comment or suggestion:
 
 ```markdown
 Please revisit {==this sentence==}{>>Needs a source<<}{id="c1" by="user" at="2026-04-28T12:00:00.000Z"}.
@@ -307,7 +307,7 @@ This matters because the main workflow is often:
 
 - The AI writes a doc
   
-- The user opens it in Roughdraft
+- The user opens it in Markdown Mode
   
 - The user leaves comments and suggested changes
   

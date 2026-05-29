@@ -95,7 +95,7 @@ describe("CriticMarkup comments", () => {
 
   it("preserves inline code nested inside a comment anchor", () => {
     const input =
-      'Check {==`roughdraft open`==}{>>Make sure this command is visible<<}{id="cmt-code" by="user" at="2024-01-15T10:31:00.000Z"} before sharing.\n';
+      'Check {==`markdownmode open`==}{>>Make sure this command is visible<<}{id="cmt-code" by="user" at="2024-01-15T10:31:00.000Z"} before sharing.\n';
 
     const { doc, comments } = criticMarkdownToEditorState(input);
     const paragraph = doc.content?.[0];
@@ -103,7 +103,7 @@ describe("CriticMarkup comments", () => {
 
     expect(codeNode).toMatchObject({
       type: "text",
-      text: "roughdraft open",
+      text: "markdownmode open",
       marks: expect.arrayContaining([
         expect.objectContaining({
           type: "commentRef",
@@ -117,7 +117,7 @@ describe("CriticMarkup comments", () => {
 
   it("creates one comment anchor when a selection spans inline code", () => {
     const input =
-      "Each dev wrapper keeps its own server state under `~/.roughdraft/dev/<wrapper-name>` by default, so opening works.\n";
+      "Each dev wrapper keeps its own server state under `~/.markdownmode/dev/<wrapper-name>` by default, so opening works.\n";
     const { doc } = criticMarkdownToEditorState(input);
     const editor = new Editor({
       extensions: createEditorExtensions(""),
@@ -151,7 +151,7 @@ describe("CriticMarkup comments", () => {
           ]),
         ),
       ).toBe(
-        'Each dev wrapper keeps {==its own server state under `~/.roughdraft/dev/<wrapper-name>` by default==}{>>test<<}{id="c1" by="user" at="2026-04-25T21:54:47.475Z"}, so opening works.\n',
+        'Each dev wrapper keeps {==its own server state under `~/.markdownmode/dev/<wrapper-name>` by default==}{>>test<<}{id="c1" by="user" at="2026-04-25T21:54:47.475Z"}, so opening works.\n',
       );
     } finally {
       editor.destroy();
@@ -198,8 +198,8 @@ describe("CriticMarkup comments", () => {
     const input = `\`\`\`text
 Use Roughdraft when I want to open, review, comment on, or compare markdown files.
 
-Start it with \`roughdraft start\` if needed.
-Open files or folders with \`roughdraft open "/absolute/path/to/file.md"\`.
+Start it with \`markdownmode start\` if needed.
+Open files or folders with \`markdownmode open "/absolute/path/to/file.md"\`.
 After I finish reviewing in Roughdraft, continue by reading the markdown files from disk and making the requested changes there.
 Use CriticMarkup for inline review feedback in markdown.
 \`\`\`
@@ -214,8 +214,8 @@ Use CriticMarkup for inline review feedback in markdown.
       type: "text",
       text: `Use Roughdraft when I want to open, review, comment on, or compare markdown files.
 
-Start it with \`roughdraft start\` if needed.
-Open files or folders with \`roughdraft open "/absolute/path/to/file.md"\`.
+Start it with \`markdownmode start\` if needed.
+Open files or folders with \`markdownmode open "/absolute/path/to/file.md"\`.
 After I finish reviewing in Roughdraft, continue by reading the markdown files from disk and making the requested changes there.
 Use CriticMarkup for inline review feedback in markdown.`,
     });
@@ -224,7 +224,7 @@ Use CriticMarkup for inline review feedback in markdown.`,
 
   it("creates a comment anchor when a selection is inside a fenced code block", () => {
     const input = `\`\`\`ts
-const command = "roughdraft open";
+const command = "markdownmode open";
 \`\`\`
 `;
     const { doc } = criticMarkdownToEditorState(input);
@@ -239,8 +239,8 @@ const command = "roughdraft open";
         editor.state.doc.content.size,
         "\n",
       );
-      const start = text.indexOf("roughdraft open");
-      const end = start + "roughdraft open".length;
+      const start = text.indexOf("markdownmode open");
+      const end = start + "markdownmode open".length;
 
       editor.commands.setTextSelection({ from: start + 1, to: end + 1 });
       const added = editor.commands.setCommentRef({ commentIds: ["c1"] });
@@ -256,7 +256,7 @@ const command = "roughdraft open";
           },
           {
             type: "text",
-            text: "roughdraft open",
+            text: "markdownmode open",
             marks: [
               {
                 type: "commentRef",
@@ -285,7 +285,7 @@ const command = "roughdraft open";
           ]),
         ),
       ).toBe(`\`\`\`ts
-const command = "{==roughdraft open==}{>>test<<}{id="c1" by="user" at="2026-04-25T22:14:08.827Z"}";
+const command = "{==markdownmode open==}{>>test<<}{id="c1" by="user" at="2026-04-25T22:14:08.827Z"}";
 \`\`\`
 `);
     } finally {
@@ -295,7 +295,7 @@ const command = "{==roughdraft open==}{>>test<<}{id="c1" by="user" at="2026-04-2
 
   it("round-trips comment anchors inside fenced code blocks", () => {
     const input = `\`\`\`ts
-const command = "{==roughdraft open==}{>>test<<}{id="c1" by="user" at="2026-04-25T22:14:08.827Z"}";
+const command = "{==markdownmode open==}{>>test<<}{id="c1" by="user" at="2026-04-25T22:14:08.827Z"}";
 \`\`\`
 `;
 
@@ -311,7 +311,7 @@ const command = "{==roughdraft open==}{>>test<<}{id="c1" by="user" at="2026-04-2
         },
         {
           type: "text",
-          text: "roughdraft open",
+          text: "markdownmode open",
           marks: [
             {
               type: "commentRef",

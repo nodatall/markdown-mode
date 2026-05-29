@@ -1734,6 +1734,72 @@ describe("PageCard editor integration", () => {
     ).not.toBeNull();
   });
 
+  it("closes a new comment composer after Add and does not reopen it on outside clicks", async () => {
+    const rendered = await renderPageCard({
+      page: {
+        id: "doc-comment-add-close-1",
+        title: "Doc Comment Add Close 1",
+        content: "Comment target text",
+      },
+      selected: true,
+    });
+
+    await selectText(rendered.getEditor(), "target");
+    await flushCommentLayout();
+
+    const commentEditor = getByTestId<HTMLTextAreaElement>(
+      rendered.container,
+      "comment-rail-c1-editor",
+    );
+    await act(async () => {
+      const valueSetter = Object.getOwnPropertyDescriptor(
+        HTMLTextAreaElement.prototype,
+        "value",
+      )?.set;
+      valueSetter?.call(commentEditor, "Close this after add");
+      commentEditor.dispatchEvent(new InputEvent("input", { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    const addButton = getByTestId<HTMLButtonElement>(
+      rendered.container,
+      "comment-rail-c1-action-save",
+    );
+    expect(addButton.textContent).toBe("Add");
+
+    await act(async () => {
+      addButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+    await flushCommentLayout();
+
+    expect(
+      queryByTestId(rendered.container, "comment-rail-c1-editor"),
+    ).toBeNull();
+    expect(
+      getByTestId(
+        rendered.container,
+        "document-comment-marker-c1",
+      ).getAttribute("aria-label"),
+    ).toBe("Open comment 1");
+
+    await act(async () => {
+      document.body.dispatchEvent(
+        new PointerEvent("pointerdown", {
+          bubbles: true,
+          cancelable: true,
+          button: 0,
+        }),
+      );
+      await Promise.resolve();
+    });
+    await flushCommentLayout();
+
+    expect(
+      queryByTestId(rendered.container, "comment-rail-c1-editor"),
+    ).toBeNull();
+  });
+
   it("lets existing comments be edited directly without reply, edit, or inline delete actions", async () => {
     const rendered = await renderPageCard({
       page: {

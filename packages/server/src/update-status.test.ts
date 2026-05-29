@@ -28,12 +28,12 @@ describe("resolveUpdateStatus", () => {
   });
 
   it("reports when the installed version is behind npm", async () => {
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "roughdraft-pkg-"));
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "markdownmode-pkg-"));
     const packageJsonPath = path.join(tempDir, "package.json");
     tempPaths.push(tempDir);
     fs.writeFileSync(
       packageJsonPath,
-      JSON.stringify({ name: "roughdraft", version: "0.1.0" }),
+      JSON.stringify({ name: "markdownmode", version: "0.1.0" }),
     );
 
     const status = await resolveUpdateStatus({
@@ -46,21 +46,21 @@ describe("resolveUpdateStatus", () => {
     });
 
     expect(status).toEqual({
-      packageName: "roughdraft",
+      packageName: "markdownmode",
       currentVersion: "0.1.0",
       latestVersion: "0.2.0",
       updateAvailable: true,
-      updateCommand: "npm i -g roughdraft@latest",
+      updateCommand: "npm i -g markdownmode@latest",
     });
   });
 
   it("degrades cleanly when npm cannot be reached", async () => {
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "roughdraft-pkg-"));
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "markdownmode-pkg-"));
     const packageJsonPath = path.join(tempDir, "package.json");
     tempPaths.push(tempDir);
     fs.writeFileSync(
       packageJsonPath,
-      JSON.stringify({ name: "roughdraft", version: "0.1.0" }),
+      JSON.stringify({ name: "markdownmode", version: "0.1.0" }),
     );
 
     const status = await resolveUpdateStatus({
@@ -71,11 +71,11 @@ describe("resolveUpdateStatus", () => {
     });
 
     expect(status).toEqual({
-      packageName: "roughdraft",
+      packageName: "markdownmode",
       currentVersion: "0.1.0",
       latestVersion: null,
       updateAvailable: false,
-      updateCommand: "npm i -g roughdraft@latest",
+      updateCommand: "npm i -g markdownmode@latest",
     });
   });
 });

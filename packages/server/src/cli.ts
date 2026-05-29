@@ -21,7 +21,7 @@ import { resolveUpdateStatus, type UpdateStatus } from "./update-status.js";
 const AGENT_SETUP_URL = "https://roughdraft.md/setup.md";
 const ROUGHDRAFT_FLAVORED_MARKDOWN_SPEC_URL =
   "https://roughdraft.md/spec/roughdraft-flavored-markdown.md";
-const AGENT_SETUP_PROMPT = `Install Roughdraft for me using \`npm i -g roughdraft\`, then read ${AGENT_SETUP_URL} and set yourself up to use it.`;
+const AGENT_SETUP_PROMPT = `Install Markdown Mode for me using \`npm i -g markdownmode\`, then read ${AGENT_SETUP_URL} and set yourself up to use it.`;
 const STATUS_PATH = "/api/status";
 const STATUS_TIMEOUT_MS = 750;
 const SERVER_WAIT_ATTEMPTS = 40;
@@ -741,7 +741,7 @@ function defaultSpawnServerProcess(options: {
   child.unref();
 
   if (!child.pid) {
-    throw new Error("Failed to start Roughdraft in the background.");
+    throw new Error("Failed to start Markdown Mode in the background.");
   }
 
   return { pid: child.pid };
@@ -777,17 +777,19 @@ async function printUpdateNoticeIfAvailable(deps: CliDependencies) {
     if (!updateStatus.updateAvailable) return;
 
     deps.log(
-      `Roughdraft update available: ${updateStatus.currentVersion} -> ${updateStatus.latestVersion}. Run \`${updateStatus.updateCommand}\` to update.`,
+      `Markdown Mode update available: ${updateStatus.currentVersion} -> ${updateStatus.latestVersion}. Run \`${updateStatus.updateCommand}\` to update.`,
     );
   } catch {}
 }
 
 function printHelp(log: (message: string) => void) {
-  log("Roughdraft is a local Markdown review app for AI-assisted workflows.");
+  log(
+    "Markdown Mode is a local Markdown review app for AI-assisted workflows.",
+  );
   log("");
   log("Usage:");
-  log("  roughdraft [flags] <command> [args]");
-  log("  roughdraft <path>");
+  log("  markdownmode [flags] <command> [args]");
+  log("  markdownmode <path>");
   log("");
   log("Commands:");
   log("  open <path>        Open one Markdown file");
@@ -809,15 +811,15 @@ function printHelp(log: (message: string) => void) {
   log("  --no-color         Disable color");
   log("");
   log("Examples:");
-  log("  roughdraft open ./draft.md");
-  log("  roughdraft open ./draft.md --print-url");
-  log("  roughdraft open ./draft.md --json");
-  log("  roughdraft open ./draft.md --watch");
-  log("  roughdraft watch ./draft.md --json");
-  log("  roughdraft status --json");
+  log("  markdownmode open ./draft.md");
+  log("  markdownmode open ./draft.md --print-url");
+  log("  markdownmode open ./draft.md --json");
+  log("  markdownmode open ./draft.md --watch");
+  log("  markdownmode watch ./draft.md --json");
+  log("  markdownmode status --json");
   log("");
   log(`Agent setup: ${AGENT_SETUP_URL}`);
-  log("Use `roughdraft help agent` for a copyable setup prompt.");
+  log("Use `markdownmode help agent` for a copyable setup prompt.");
 }
 
 function printCommandHelp(
@@ -827,10 +829,10 @@ function printCommandHelp(
   if (command === "open") {
     log("Usage:");
     log(
-      "  roughdraft open <path> [--no-open] [--watch] [--print-url] [--port <port>]",
+      "  markdownmode open <path> [--no-open] [--watch] [--print-url] [--port <port>]",
     );
     log("");
-    log("Opens one Markdown file. Starts Roughdraft if needed.");
+    log("Opens one Markdown file. Starts Markdown Mode if needed.");
     log("");
     log("Flags:");
     log(
@@ -853,7 +855,7 @@ function printCommandHelp(
     log("");
     log("Environment variables:");
     log(
-      "  ROUGHDRAFT_HOST       Route open through a hosted Roughdraft instance",
+      "  ROUGHDRAFT_HOST       Route open through a hosted Markdown Mode instance",
     );
     log("                        (remote mode). The CLI registers a session,");
     log("                        opens an SSE channel, and writes save events");
@@ -878,9 +880,9 @@ function printCommandHelp(
 
   if (command === "start") {
     log("Usage:");
-    log("  roughdraft start [--port <port>] [--json]");
+    log("  markdownmode start [--port <port>] [--json]");
     log("");
-    log("Starts or reuses the background Roughdraft server.");
+    log("Starts or reuses the background Markdown Mode server.");
     log("");
     log("Flags:");
     log("  --json               Print machine-readable output");
@@ -892,9 +894,9 @@ function printCommandHelp(
 
   if (command === "status") {
     log("Usage:");
-    log("  roughdraft status [--json]");
+    log("  markdownmode status [--json]");
     log("");
-    log("Shows whether Roughdraft is running.");
+    log("Shows whether Markdown Mode is running.");
     log("");
     log("Flags:");
     log("  --json               Print machine-readable output");
@@ -905,9 +907,9 @@ function printCommandHelp(
 
   if (command === "stop") {
     log("Usage:");
-    log("  roughdraft stop [--all]");
+    log("  markdownmode stop [--all]");
     log("");
-    log("Stops the managed background Roughdraft server.");
+    log("Stops the managed background Markdown Mode server.");
     log("");
     log("Flags:");
     log(
@@ -920,10 +922,10 @@ function printCommandHelp(
 
   if (command === "watch") {
     log("Usage:");
-    log("  roughdraft watch <path> [--json] [--timeout <seconds>]");
+    log("  markdownmode watch <path> [--json] [--timeout <seconds>]");
     log("");
     log(
-      "Waits until Roughdraft receives Done Reviewing for one Markdown file.",
+      "Waits until Markdown Mode receives Done Reviewing for one Markdown file.",
     );
     log("");
     log("Flags:");
@@ -944,18 +946,18 @@ function printCommandHelp(
 
   if (command === "mcp") {
     log("Usage:");
-    log("  roughdraft mcp");
+    log("  markdownmode mcp");
     log("");
-    log("Starts Roughdraft's experimental stdio MCP server.");
+    log("Starts Markdown Mode's experimental stdio MCP server.");
     return;
   }
 
   if (command === "doctor") {
     log("Usage:");
-    log("  roughdraft doctor [path] [--json]");
+    log("  markdownmode doctor [path] [--json]");
     log("");
     log(
-      "Diagnoses local Roughdraft setup and server state, or validates one Markdown file.",
+      "Diagnoses local Markdown Mode setup and server state, or validates one Markdown file.",
     );
     log("");
     log("Flags:");
@@ -1004,7 +1006,7 @@ function printCriticMarkupHelp(log: (message: string) => void) {
   log("");
   log("When adding new review feedback:");
   log(
-    '  Prefer the extended Roughdraft format with `id`, `by`, and `at` metadata, for example {>>Comment<<}{id="c1" by="AI" at="2026-04-28T12:00:00.000Z"}.',
+    '  Prefer the extended Markdown Mode format with `id`, `by`, and `at` metadata, for example {>>Comment<<}{id="c1" by="AI" at="2026-04-28T12:00:00.000Z"}.',
   );
   log(
     "  Use `c1`, `c2`, etc. for comment ids and `s1`, `s2`, etc. for suggested-change ids.",
@@ -1265,7 +1267,7 @@ async function runRemoteOpen(
       path: options.openPath,
     });
   } else {
-    deps.log(`Opened remote Roughdraft session: ${viewerUrl}`);
+    deps.log(`Opened remote Markdown Mode session: ${viewerUrl}`);
     deps.log(`Holding session open for ${options.openPath}. Ctrl-C to exit.`);
   }
 
@@ -1386,12 +1388,14 @@ function resolveTargetPath(inputPath: string): ResolvedTargetPath {
   try {
     const stat = fs.statSync(resolvedPath);
     if (stat.isDirectory()) {
-      throw new Error(`Roughdraft can only open .md files: ${resolvedPath}`);
+      throw new Error(`Markdown Mode can only open .md files: ${resolvedPath}`);
     }
 
     if (stat.isFile()) {
       if (!looksLikeMarkdownFile) {
-        throw new Error(`Roughdraft can only open .md files: ${resolvedPath}`);
+        throw new Error(
+          `Markdown Mode can only open .md files: ${resolvedPath}`,
+        );
       }
 
       return {
@@ -1402,7 +1406,7 @@ function resolveTargetPath(inputPath: string): ResolvedTargetPath {
   } catch (error) {
     if (
       error instanceof Error &&
-      error.message.startsWith("Roughdraft can only open")
+      error.message.startsWith("Markdown Mode can only open")
     ) {
       throw error;
     }
@@ -1431,7 +1435,7 @@ export function getServerStateFilePath(
     return path.join(path.resolve(explicitDir), "server.json");
   }
 
-  return path.join(os.homedir(), ".roughdraft", "server.json");
+  return path.join(os.homedir(), ".markdownmode", "server.json");
 }
 
 function isValidServerState(value: unknown): value is RoughdraftServerState {
@@ -1554,7 +1558,7 @@ async function waitForServer(port: number, deps: CliDependencies) {
     await deps.sleepImpl(SERVER_WAIT_DELAY_MS);
   }
 
-  throw new Error("Timed out waiting for Roughdraft to start.");
+  throw new Error("Timed out waiting for Markdown Mode to start.");
 }
 
 async function waitForServerToStop(
@@ -1889,7 +1893,7 @@ async function runDoctor(
       : false;
   const commandPath = process.argv[1] ? path.resolve(process.argv[1]) : null;
   const devStateDir = deps.env.ROUGHDRAFT_STATE_DIR?.includes(
-    `${path.sep}.roughdraft${path.sep}dev${path.sep}`,
+    `${path.sep}.markdownmode${path.sep}dev${path.sep}`,
   )
     ? path.resolve(deps.env.ROUGHDRAFT_STATE_DIR)
     : null;
@@ -1985,7 +1989,9 @@ async function runMarkdownDoctor(
   json: boolean,
 ): Promise<number> {
   if (!isMarkdownPath(targetPath)) {
-    deps.error(`Roughdraft doctor can only validate .md files: ${targetPath}`);
+    deps.error(
+      `Markdown Mode doctor can only validate .md files: ${targetPath}`,
+    );
     return USAGE_ERROR;
   }
 
@@ -2030,7 +2036,7 @@ async function runMarkdownDoctor(
   }
 
   const displayPath = relativeDisplayPath(deps.cwd, absolutePath);
-  deps.log(`Roughdraft Markdown doctor: ${displayPath}`);
+  deps.log(`Markdown Mode Markdown doctor: ${displayPath}`);
   deps.log(`Status: ${validation.ok ? "passed" : "failed"}`);
 
   if (validation.errors.length > 0) {
@@ -2188,7 +2194,7 @@ export async function runCli(
     if (parsed.command === "help") {
       const [topic, ...extra] = parsed.rest;
       if (extra.length > 0) {
-        deps.error("Usage: roughdraft help [agent|criticmarkup|command]");
+        deps.error("Usage: markdownmode help [agent|criticmarkup|command]");
         return USAGE_ERROR;
       }
 
@@ -2264,7 +2270,7 @@ export async function runCli(
       }
 
       if (options.positionals.length > 0) {
-        deps.error("Usage: roughdraft start [--port <port>] [--json]");
+        deps.error("Usage: markdownmode start [--port <port>] [--json]");
         return USAGE_ERROR;
       }
 
@@ -2286,10 +2292,10 @@ export async function runCli(
 
       if (result.reused) {
         if (result.server.tracked) {
-          deps.log(`Roughdraft is already running at ${result.server.url}`);
+          deps.log(`Markdown Mode is already running at ${result.server.url}`);
         } else {
           deps.log(
-            `Roughdraft is already running at ${result.server.url}, but it is not managed by ${getServerStateFilePath(deps.env)}.`,
+            `Markdown Mode is already running at ${result.server.url}, but it is not managed by ${getServerStateFilePath(deps.env)}.`,
           );
         }
         return 0;
@@ -2301,7 +2307,7 @@ export async function runCli(
         );
       }
 
-      deps.log(`Roughdraft running at ${result.server.url}`);
+      deps.log(`Markdown Mode running at ${result.server.url}`);
       return 0;
     }
 
@@ -2320,7 +2326,7 @@ export async function runCli(
       }
 
       if (options.positionals.length > 0) {
-        deps.error("Usage: roughdraft status [--json]");
+        deps.error("Usage: markdownmode status [--json]");
         return USAGE_ERROR;
       }
 
@@ -2338,7 +2344,7 @@ export async function runCli(
         }
 
         deps.log(
-          "Roughdraft is not running. Start it with `roughdraft start`.",
+          "Markdown Mode is not running. Start it with `markdownmode start`.",
         );
         return 1;
       }
@@ -2351,7 +2357,7 @@ export async function runCli(
         return 0;
       }
 
-      deps.log(`Roughdraft is running at ${server.url}`);
+      deps.log(`Markdown Mode is running at ${server.url}`);
       if (server.tracked && server.pid !== null && server.startedAt !== null) {
         deps.log(`PID: ${server.pid}`);
         deps.log(`Started: ${server.startedAt}`);
@@ -2379,7 +2385,7 @@ export async function runCli(
       }
 
       if (options.positionals.length > 0) {
-        deps.error("Usage: roughdraft stop [--all]");
+        deps.error("Usage: markdownmode stop [--all]");
         return USAGE_ERROR;
       }
 
@@ -2412,7 +2418,7 @@ export async function runCli(
               }
 
               deps.log(
-                `Stopped unmanaged Roughdraft at ${buildPublicBaseUrl(preferredPort)}.`,
+                `Stopped unmanaged Markdown Mode at ${buildPublicBaseUrl(preferredPort)}.`,
               );
               return 0;
             }
@@ -2433,8 +2439,8 @@ export async function runCli(
 
           deps.error(
             options.all
-              ? `Roughdraft is still running at ${buildPublicBaseUrl(preferredPort)}, but it could not be matched to a safe process candidate. Stop it manually.`
-              : `Roughdraft is still running at ${buildPublicBaseUrl(preferredPort)}, but it is not managed by ${stateFilePath}. Stop it manually.`,
+              ? `Markdown Mode is still running at ${buildPublicBaseUrl(preferredPort)}, but it could not be matched to a safe process candidate. Stop it manually.`
+              : `Markdown Mode is still running at ${buildPublicBaseUrl(preferredPort)}, but it is not managed by ${stateFilePath}. Stop it manually.`,
           );
           return 1;
         }
@@ -2448,7 +2454,7 @@ export async function runCli(
           return 0;
         }
 
-        deps.log("Roughdraft is not running.");
+        deps.log("Markdown Mode is not running.");
         return 0;
       }
 
@@ -2463,7 +2469,7 @@ export async function runCli(
         }
 
         deps.error(
-          `Failed to stop Roughdraft process ${stopResult.failedPid}.`,
+          `Failed to stop Markdown Mode process ${stopResult.failedPid}.`,
         );
         return 1;
       }
@@ -2494,9 +2500,11 @@ export async function runCli(
               }
 
               deps.log(
-                `Stopped Roughdraft at ${buildPublicBaseUrl(stopResult.persistedState.port)}.`,
+                `Stopped Markdown Mode at ${buildPublicBaseUrl(stopResult.persistedState.port)}.`,
               );
-              deps.log(`Stopped unmanaged Roughdraft process ${candidatePid}.`);
+              deps.log(
+                `Stopped unmanaged Markdown Mode process ${candidatePid}.`,
+              );
               return 0;
             }
           }
@@ -2517,7 +2525,7 @@ export async function runCli(
         }
 
         deps.error(
-          `Stopped tracked Roughdraft process ${stopResult.persistedState.pid}, but another Roughdraft instance is still running at ${buildPublicBaseUrl(stopResult.persistedState.port)}.`,
+          `Stopped tracked Markdown Mode process ${stopResult.persistedState.pid}, but another Markdown Mode instance is still running at ${buildPublicBaseUrl(stopResult.persistedState.port)}.`,
         );
         return 1;
       }
@@ -2533,7 +2541,7 @@ export async function runCli(
       }
 
       deps.log(
-        `Stopped Roughdraft at ${buildPublicBaseUrl(stopResult.persistedState.port)}.`,
+        `Stopped Markdown Mode at ${buildPublicBaseUrl(stopResult.persistedState.port)}.`,
       );
       return 0;
     }
@@ -2553,7 +2561,7 @@ export async function runCli(
       }
 
       if (options.positionals.length !== 1) {
-        deps.error("Usage: roughdraft watch <path> [--json]");
+        deps.error("Usage: markdownmode watch <path> [--json]");
         return USAGE_ERROR;
       }
 
@@ -2576,7 +2584,7 @@ export async function runCli(
         return 0;
       }
       if (options.positionals.length > 0) {
-        deps.error("Usage: roughdraft mcp");
+        deps.error("Usage: markdownmode mcp");
         return USAGE_ERROR;
       }
 
@@ -2600,7 +2608,7 @@ export async function runCli(
       }
 
       if (options.positionals.length > 1) {
-        deps.error("Usage: roughdraft doctor [path] [--json]");
+        deps.error("Usage: markdownmode doctor [path] [--json]");
         return USAGE_ERROR;
       }
 
@@ -2634,12 +2642,12 @@ export async function runCli(
 
       const target = options.positionals[0];
       if (!target) {
-        deps.error("Usage: roughdraft open <path>");
+        deps.error("Usage: markdownmode open <path>");
         return USAGE_ERROR;
       }
 
       if (options.positionals.length > 1) {
-        deps.error("Usage: roughdraft open <path>");
+        deps.error("Usage: markdownmode open <path>");
         return USAGE_ERROR;
       }
 
@@ -2723,13 +2731,17 @@ export async function runCli(
       if (shouldWatch) {
         if (!json) {
           if (openMode === "chrome-app") {
-            deps.log(`Opened Roughdraft in a Chrome app window: ${targetUrl}`);
+            deps.log(
+              `Opened Markdown Mode in a Chrome app window: ${targetUrl}`,
+            );
           } else if (openMode === "existing-window") {
-            deps.log(`Reused an existing Roughdraft window: ${targetUrl}`);
+            deps.log(`Reused an existing Markdown Mode window: ${targetUrl}`);
           } else if (openMode === "browser") {
-            deps.log(`Opened Roughdraft in the default browser: ${targetUrl}`);
+            deps.log(
+              `Opened Markdown Mode in the default browser: ${targetUrl}`,
+            );
           } else {
-            deps.log(`Roughdraft is running at ${targetUrl}`);
+            deps.log(`Markdown Mode is running at ${targetUrl}`);
           }
           deps.log("Waiting for Done Reviewing...");
         }
@@ -2763,21 +2775,21 @@ export async function runCli(
 
       shouldPrintUpdateNotice = true;
       if (openMode === "chrome-app") {
-        deps.log(`Opened Roughdraft in a Chrome app window: ${targetUrl}`);
+        deps.log(`Opened Markdown Mode in a Chrome app window: ${targetUrl}`);
         return 0;
       }
 
       if (openMode === "existing-window") {
-        deps.log(`Reused an existing Roughdraft window: ${targetUrl}`);
+        deps.log(`Reused an existing Markdown Mode window: ${targetUrl}`);
         return 0;
       }
 
       if (openMode === "browser") {
-        deps.log(`Opened Roughdraft in the default browser: ${targetUrl}`);
+        deps.log(`Opened Markdown Mode in the default browser: ${targetUrl}`);
         return 0;
       }
 
-      deps.log(`Roughdraft is running at ${targetUrl}`);
+      deps.log(`Markdown Mode is running at ${targetUrl}`);
       return 0;
     }
 

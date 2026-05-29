@@ -54,7 +54,7 @@ function nextAssetPath(
 
   while (true) {
     const suffix = counter === 0 ? "" : `-${counter}`;
-    const path = `./.roughdraft-assets/${basename}${suffix}${extension}`;
+    const path = `./.markdownmode-assets/${basename}${suffix}${extension}`;
     if (!assets[path]) return path;
     counter += 1;
   }

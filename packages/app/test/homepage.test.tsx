@@ -10,7 +10,7 @@ import {
 } from "../src/App";
 
 const AGENT_SETUP_PROMPT =
-  "Install Roughdraft for me using `npm i -g roughdraft`, then read https://roughdraft.md/setup.md and set yourself up to use it.";
+  "Install Markdown Mode for me using `npm i -g markdownmode`, then read https://roughdraft.md/setup.md and set yourself up to use it.";
 
 function createDomRect({
   left = 0,
