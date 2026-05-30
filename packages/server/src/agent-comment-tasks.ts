@@ -1,5 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
+import {
+  spawn,
+  spawnSync,
+  type ChildProcessWithoutNullStreams,
+} from "node:child_process";
 import type { RfmReviewItem } from "@roughdraft/rfm";
 
 export type AgentCommentSessionMode = "attached" | "detached";
@@ -71,6 +76,7 @@ export interface AgentCommentAdapterResult {
 export interface AgentCommentAdapter {
   capability(): AgentCommentAdapterCapability;
   submit(task: AgentCommentTask): Promise<AgentCommentAdapterResult>;
+  status?(task: AgentCommentTask): AgentCommentAdapterResult | null;
 }
 
 interface AgentCommentTaskServiceOptions {
@@ -183,6 +189,9 @@ export class AgentCommentTaskService {
   }
 
   getTask(taskId: string): AgentCommentTask | null {
+    const task = this.tasks.get(taskId);
+    if (!task) return null;
+    this.refreshTaskFromAdapter(task);
     return this.tasks.get(taskId) ?? null;
   }
 
@@ -195,7 +204,26 @@ export class AgentCommentTaskService {
     const taskIds = this.documentQueues.get(normalizedPath) ?? [];
     return taskIds
       .map((taskId) => this.tasks.get(taskId))
-      .filter((task): task is AgentCommentTask => Boolean(task));
+      .filter((task): task is AgentCommentTask => Boolean(task))
+      .map((task) => {
+        this.refreshTaskFromAdapter(task);
+        return this.tasks.get(task.id) ?? task;
+      });
+  }
+
+  private refreshTaskFromAdapter(task: AgentCommentTask): void {
+    const result = this.adapter.status?.(task);
+    if (!result) return;
+    if (
+      result.status === task.status &&
+      (result.error ?? null) === task.error
+    ) {
+      return;
+    }
+    this.updateTask(task.id, {
+      status: result.status,
+      error: result.error ?? null,
+    });
   }
 
   private rememberTask(task: AgentCommentTask): void {
@@ -268,6 +296,357 @@ export class FakeAgentCommentAdapter implements AgentCommentAdapter {
   }
 }
 
+interface JsonRpcRequest {
+  jsonrpc: "2.0";
+  id: number;
+  method: string;
+  params: unknown;
+}
+
+interface JsonRpcResponse {
+  id?: number;
+  result?: unknown;
+  error?: { message?: string } | string;
+  method?: string;
+  params?: unknown;
+}
+
+interface CodexThreadResponse {
+  thread?: {
+    id?: string;
+  };
+}
+
+interface CodexTurnResponse {
+  turn?: {
+    id?: string;
+  };
+}
+
+interface CodexTurnCompletedParams {
+  threadId?: string;
+  turn?: {
+    id?: string;
+    status?: string;
+    error?: { message?: string } | string | null;
+  };
+}
+
+export class CodexAppServerJsonRpcClient {
+  private child: ChildProcessWithoutNullStreams | null = null;
+  private nextId = 1;
+  private initialized: Promise<void> | null = null;
+  private stdoutBuffer = "";
+  private readonly pending = new Map<
+    number,
+    {
+      resolve: (value: unknown) => void;
+      reject: (error: Error) => void;
+    }
+  >();
+  private readonly turnCompletedHandlers = new Set<
+    (params: CodexTurnCompletedParams) => void
+  >();
+
+  constructor(
+    private readonly command = "codex",
+    private readonly args = ["app-server", "--listen", "stdio://"],
+  ) {}
+
+  onTurnCompleted(handler: (params: CodexTurnCompletedParams) => void): void {
+    this.turnCompletedHandlers.add(handler);
+  }
+
+  async initialize(): Promise<void> {
+    if (!this.initialized) {
+      this.initialized = this.request("initialize", {
+        clientInfo: {
+          name: "markdown-mode",
+          version: "0.1.0",
+        },
+        capabilities: null,
+      }).then(() => undefined);
+    }
+
+    await this.initialized;
+  }
+
+  async request(method: string, params: unknown): Promise<unknown> {
+    this.ensureChild();
+    const id = this.nextId;
+    this.nextId += 1;
+
+    const payload: JsonRpcRequest = {
+      jsonrpc: "2.0",
+      id,
+      method,
+      params,
+    };
+
+    const promise = new Promise<unknown>((resolve, reject) => {
+      this.pending.set(id, { resolve, reject });
+    });
+    this.child?.stdin.write(`${JSON.stringify(payload)}\n`);
+    return promise;
+  }
+
+  private ensureChild(): void {
+    if (this.child) return;
+
+    const child = spawn(this.command, this.args, {
+      stdio: ["pipe", "pipe", "pipe"],
+      env: process.env,
+    });
+    this.child = child;
+
+    child.stdout.on("data", (chunk: Buffer) => {
+      this.handleStdout(chunk.toString("utf8"));
+    });
+    child.stderr.on("data", (chunk: Buffer) => {
+      appendSlog("codex-app-server.stderr", {
+        message: chunk.toString("utf8"),
+      });
+    });
+    child.on("error", (error) => {
+      this.rejectPending(error);
+    });
+    child.on("exit", (code, signal) => {
+      this.rejectPending(
+        new Error(
+          `Codex app-server exited before the agent task completed (${signal ?? code ?? "unknown"}).`,
+        ),
+      );
+      this.child = null;
+      this.initialized = null;
+    });
+
+    const shutdown = () => {
+      child.kill("SIGTERM");
+    };
+    process.once("exit", shutdown);
+  }
+
+  private handleStdout(chunk: string): void {
+    this.stdoutBuffer += chunk;
+    while (true) {
+      const newlineIndex = this.stdoutBuffer.indexOf("\n");
+      if (newlineIndex === -1) break;
+
+      const line = this.stdoutBuffer.slice(0, newlineIndex).trim();
+      this.stdoutBuffer = this.stdoutBuffer.slice(newlineIndex + 1);
+      if (!line) continue;
+      this.handleMessage(line);
+    }
+  }
+
+  private handleMessage(line: string): void {
+    let message: JsonRpcResponse;
+    try {
+      message = JSON.parse(line) as JsonRpcResponse;
+    } catch {
+      appendSlog("codex-app-server.invalid-json", { line });
+      return;
+    }
+
+    if (typeof message.id === "number") {
+      const pending = this.pending.get(message.id);
+      if (!pending) return;
+      this.pending.delete(message.id);
+      if (message.error) {
+        pending.reject(
+          new Error(
+            typeof message.error === "string"
+              ? message.error
+              : (message.error.message ?? "Codex app-server request failed."),
+          ),
+        );
+      } else {
+        pending.resolve(message.result);
+      }
+      return;
+    }
+
+    if (message.method === "turn/completed") {
+      const params = message.params as CodexTurnCompletedParams;
+      for (const handler of this.turnCompletedHandlers) {
+        handler(params);
+      }
+    }
+  }
+
+  private rejectPending(error: Error): void {
+    for (const [, pending] of this.pending) {
+      pending.reject(error);
+    }
+    this.pending.clear();
+  }
+}
+
+export class CodexAppServerAgentCommentAdapter implements AgentCommentAdapter {
+  private readonly client: CodexAppServerJsonRpcClient;
+  private readonly unavailableReason: string | null;
+  private readonly taskStatus = new Map<string, AgentCommentAdapterResult>();
+  private readonly taskByTurn = new Map<string, string>();
+
+  constructor(
+    options: {
+      command?: string;
+      client?: CodexAppServerJsonRpcClient;
+      unavailableReason?: string | null;
+    } = {},
+  ) {
+    this.client =
+      options.client ??
+      new CodexAppServerJsonRpcClient(options.command ?? "codex");
+    this.unavailableReason =
+      options.unavailableReason ??
+      detectCodexAppServerUnavailableReason(options.command ?? "codex");
+    this.client.onTurnCompleted((params) => {
+      this.handleTurnCompleted(params);
+    });
+  }
+
+  capability(): AgentCommentAdapterCapability {
+    return {
+      available: this.unavailableReason === null,
+      name: "codex-app-server",
+      reason: this.unavailableReason,
+      supportsAttached: this.unavailableReason === null,
+      supportsDetached: this.unavailableReason === null,
+    };
+  }
+
+  async submit(task: AgentCommentTask): Promise<AgentCommentAdapterResult> {
+    if (this.unavailableReason) {
+      return { status: "needs_attention", error: this.unavailableReason };
+    }
+
+    await this.client.initialize();
+    const threadId =
+      task.mode === "attached" && task.originThreadId
+        ? await this.forkAttachedThread(task)
+        : await this.startDetachedThread(task);
+    const turnId = await this.startTurn(threadId, task);
+    this.taskByTurn.set(`${threadId}:${turnId}`, task.id);
+    this.taskStatus.set(task.id, { status: "working", error: null });
+
+    appendSlog("agent-comment-task.codex-started", {
+      taskId: task.id,
+      commentId: task.comment.id,
+      threadId,
+      turnId,
+      mode: task.mode,
+    });
+
+    return { status: "working", error: null };
+  }
+
+  status(task: AgentCommentTask): AgentCommentAdapterResult | null {
+    return this.taskStatus.get(task.id) ?? null;
+  }
+
+  private async forkAttachedThread(task: AgentCommentTask): Promise<string> {
+    const result = (await this.client.request("thread/fork", {
+      threadId: task.originThreadId,
+      cwd: task.projectPath,
+      approvalPolicy: "never",
+      sandbox: "workspace-write",
+      ephemeral: false,
+      excludeTurns: true,
+    })) as CodexThreadResponse;
+
+    const threadId = result.thread?.id;
+    if (!threadId) {
+      throw new Error("Codex app-server did not return a forked thread id.");
+    }
+    return threadId;
+  }
+
+  private async startDetachedThread(task: AgentCommentTask): Promise<string> {
+    const result = (await this.client.request("thread/start", {
+      cwd: task.projectPath,
+      approvalPolicy: "never",
+      sandbox: "workspace-write",
+      serviceName: "Markdown Mode",
+      ephemeral: false,
+    })) as CodexThreadResponse;
+
+    const threadId = result.thread?.id;
+    if (!threadId) {
+      throw new Error("Codex app-server did not return a thread id.");
+    }
+    return threadId;
+  }
+
+  private async startTurn(
+    threadId: string,
+    task: AgentCommentTask,
+  ): Promise<string> {
+    const result = (await this.client.request("turn/start", {
+      threadId,
+      cwd: task.projectPath,
+      approvalPolicy: "never",
+      sandboxPolicy: {
+        type: "workspaceWrite",
+        writableRoots: [task.projectPath],
+        networkAccess: false,
+        excludeTmpdirEnvVar: false,
+        excludeSlashTmp: false,
+      },
+      input: [
+        {
+          type: "text",
+          text: task.prompt,
+          text_elements: [],
+        },
+      ],
+    })) as CodexTurnResponse;
+
+    const turnId = result.turn?.id;
+    if (!turnId) {
+      throw new Error("Codex app-server did not return a turn id.");
+    }
+    return turnId;
+  }
+
+  private handleTurnCompleted(params: CodexTurnCompletedParams): void {
+    const threadId = params.threadId;
+    const turnId = params.turn?.id;
+    if (!threadId || !turnId) return;
+
+    const taskId = this.taskByTurn.get(`${threadId}:${turnId}`);
+    if (!taskId) return;
+
+    const failed = params.turn?.status === "failed";
+    const rawError = params.turn?.error;
+    const error =
+      typeof rawError === "string"
+        ? rawError
+        : (rawError?.message ?? (failed ? "Codex turn failed." : null));
+
+    this.taskStatus.set(taskId, {
+      status: failed ? "failed" : "applied",
+      error,
+    });
+  }
+}
+
+function detectCodexAppServerUnavailableReason(command: string): string | null {
+  const result = spawnSync(command, ["app-server", "--help"], {
+    stdio: "ignore",
+  });
+
+  if (result.error) {
+    return result.error.message;
+  }
+
+  if (result.status !== 0) {
+    return "The `codex app-server` command is not available.";
+  }
+
+  return null;
+}
+
 export function reviewItemToAgentCommentInput(input: {
   documentPath: string;
   projectPath: string;
@@ -301,7 +680,7 @@ export function reviewItemToAgentCommentInput(input: {
 export function buildAgentCommentPrompt(input: AgentCommentTaskInput): string {
   const absoluteFilePath = path.resolve(input.projectPath, input.relativePath);
   const lines = [
-    "A Roughdraft comment was submitted on a Markdown file.",
+    "A Markdown Mode comment was submitted on a Markdown file.",
     "",
     `File: ${absoluteFilePath}`,
     `Project: ${input.projectPath}`,

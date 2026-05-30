@@ -1,10 +1,13 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
 import {
+  type AgentCommentSession,
   type BackendInfo,
   MarkdownFileConflictError,
   type Page,
   type StorageBackend,
   type StoredAsset,
+  type SubmitAgentCommentTaskOptions,
+  type SubmitAgentCommentTaskResult,
 } from "./storage";
 
 type TauriInternalsWindow = Window & {
@@ -17,6 +20,9 @@ export interface TauriMarkdownFile {
   baseDir: string;
   contents: string;
   modified: number;
+  serverUrl?: string | null;
+  originThreadId?: string | null;
+  openSessionId?: string | null;
 }
 
 interface TauriWriteResult {
@@ -57,6 +63,8 @@ function titleForMarkdown(file: TauriMarkdownFile) {
 }
 
 export class TauriBackend implements StorageBackend {
+  private serverUrl: string | null = null;
+
   info: BackendInfo = {
     kind: "local-files" as const,
     label: "Local files",
@@ -94,10 +102,12 @@ export class TauriBackend implements StorageBackend {
   }
 
   configureProjectFromFile(file: TauriMarkdownFile) {
+    this.serverUrl = file.serverUrl?.trim() || null;
     this.info = {
       ...this.info,
       detail: file.baseDir,
       projectPath: file.baseDir,
+      originThreadId: file.originThreadId?.trim() || undefined,
     };
     return file.fileName;
   }
@@ -153,6 +163,123 @@ export class TauriBackend implements StorageBackend {
     }
 
     return this.pageFromMarkdownFile(result.saved, relativePath);
+  }
+
+  private buildServerUrl(route: string, params?: Record<string, string>) {
+    if (!this.serverUrl) {
+      throw new Error("No Markdown Mode server session is attached.");
+    }
+
+    const url = new URL(route, this.serverUrl);
+    const projectPath = this.info.projectPath?.trim();
+    if (projectPath) {
+      url.searchParams.set("projectPath", projectPath);
+    }
+
+    const originThreadId = this.info.originThreadId?.trim();
+    if (originThreadId) {
+      url.searchParams.set("originThreadId", originThreadId);
+    }
+
+    Object.entries(params ?? {}).forEach(([key, value]) => {
+      url.searchParams.set(key, value);
+    });
+
+    return url.toString();
+  }
+
+  async getAgentCommentSession(
+    relativePath: string,
+  ): Promise<AgentCommentSession> {
+    if (!this.serverUrl) {
+      const absolutePath = joinNativePath(
+        this.info.projectPath ?? "",
+        relativePath,
+      );
+      const projectPath = this.info.projectPath ?? "";
+      return {
+        documentPath: absolutePath,
+        projectPath,
+        relativePath,
+        mode: "detached",
+        originThreadId: null,
+        adapter: {
+          available: false,
+          name: "unavailable",
+          reason:
+            "No Codex thread session is attached. Open this file with `markdownmode open <path>` from a Codex app thread, or use the copy prompt fallback.",
+          supportsAttached: false,
+          supportsDetached: false,
+        },
+      };
+    }
+
+    const res = await fetch(
+      this.buildServerUrl("/api/agent-comment-session", {
+        path: relativePath,
+      }),
+    );
+
+    if (!res.ok) {
+      throw new Error(
+        `Failed to get agent comment session ${relativePath}: ${res.status}`,
+      );
+    }
+
+    return res.json();
+  }
+
+  async submitAgentCommentTask(
+    relativePath: string,
+    options: SubmitAgentCommentTaskOptions,
+  ): Promise<SubmitAgentCommentTaskResult> {
+    if (!this.serverUrl) {
+      throw new Error("No Markdown Mode server session is attached.");
+    }
+
+    const res = await fetch(
+      this.buildServerUrl("/api/agent-comment-tasks", {
+        path: relativePath,
+      }),
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectPath: this.info.projectPath,
+          path: relativePath,
+          originThreadId: this.info.originThreadId,
+          ...options,
+        }),
+      },
+    );
+
+    if (!res.ok) {
+      throw new Error(
+        `Failed to submit agent comment task ${relativePath}: ${res.status}`,
+      );
+    }
+
+    return res.json();
+  }
+
+  async getAgentCommentTask(
+    taskId: string,
+  ): Promise<SubmitAgentCommentTaskResult> {
+    if (!this.serverUrl) {
+      throw new Error("No Markdown Mode server session is attached.");
+    }
+
+    const res = await fetch(
+      this.buildServerUrl(`/api/agent-comment-tasks/${taskId}`),
+    );
+
+    if (!res.ok) {
+      throw new Error(
+        `Failed to get agent comment task ${taskId}: ${res.status}`,
+      );
+    }
+
+    return res.json();
   }
 
   watchMarkdownFile(

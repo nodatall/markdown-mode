@@ -1,7 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   AgentCommentTaskService,
   buildAgentCommentPrompt,
+  CodexAppServerAgentCommentAdapter,
+  type CodexAppServerJsonRpcClient,
   FakeAgentCommentAdapter,
   reviewItemToAgentCommentInput,
 } from "./agent-comment-tasks";
@@ -105,6 +107,105 @@ describe("AgentCommentTaskService", () => {
       id: "c1",
       text: "Add concrete evidence.",
     });
+  });
+
+  it("refreshes a working task from adapter status notifications", async () => {
+    const adapter = new FakeAgentCommentAdapter({ status: "working" });
+    adapter.status = () => ({ status: "applied", error: null });
+    const service = new AgentCommentTaskService({
+      adapter,
+      now: () => fixedDate,
+      randomId: () => "act_1",
+    });
+
+    await service.submit(commentInput());
+
+    expect(service.getTask("act_1")).toMatchObject({
+      status: "applied",
+      error: null,
+    });
+  });
+});
+
+describe("CodexAppServerAgentCommentAdapter", () => {
+  it("forks the origin thread and starts a turn with the comment prompt", async () => {
+    const requests: Array<{ method: string; params: unknown }> = [];
+    let turnCompleted:
+      | ((params: {
+          threadId?: string;
+          turn?: { id?: string; status?: string };
+        }) => void)
+      | null = null;
+    const client = {
+      initialize: vi.fn().mockResolvedValue(undefined),
+      onTurnCompleted: vi.fn((handler) => {
+        turnCompleted = handler;
+      }),
+      request: vi.fn(async (method: string, params: unknown) => {
+        requests.push({ method, params });
+        if (method === "thread/fork") {
+          return { thread: { id: "forked-thread" } };
+        }
+        if (method === "turn/start") {
+          return { turn: { id: "turn-1" } };
+        }
+        throw new Error(`Unexpected method: ${method}`);
+      }),
+    } as unknown as CodexAppServerJsonRpcClient;
+    const adapter = new CodexAppServerAgentCommentAdapter({
+      client,
+      unavailableReason: null,
+    });
+    const task = {
+      ...commentInput({ mode: "attached", originThreadId: "thread-1" }),
+      id: "act_1",
+      status: "accepted" as const,
+      adapterName: "codex-app-server",
+      prompt: "Address this comment.",
+      createdAt: fixedDate.toISOString(),
+      updatedAt: fixedDate.toISOString(),
+      error: null,
+      queuePosition: 0,
+    };
+
+    const result = await adapter.submit(task);
+
+    expect(result).toEqual({ status: "working", error: null });
+    expect(requests).toMatchObject([
+      {
+        method: "thread/fork",
+        params: {
+          threadId: "thread-1",
+          cwd: "/tmp/project",
+          approvalPolicy: "never",
+          sandbox: "workspace-write",
+          excludeTurns: true,
+        },
+      },
+      {
+        method: "turn/start",
+        params: {
+          threadId: "forked-thread",
+          cwd: "/tmp/project",
+          approvalPolicy: "never",
+          input: [
+            {
+              type: "text",
+              text: "Address this comment.",
+              text_elements: [],
+            },
+          ],
+        },
+      },
+    ]);
+    expect(adapter.status(task)).toEqual({ status: "working", error: null });
+
+    turnCompleted?.({
+      threadId: "forked-thread",
+      turn: { id: "turn-1", status: "completed" },
+    });
+
+    expect(adapter.status(task)).toEqual({ status: "applied", error: null });
   });
 });
 

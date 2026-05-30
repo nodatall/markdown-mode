@@ -87,18 +87,11 @@ export interface CliDependencies {
   }) => Promise<SpawnedServer> | SpawnedServer;
   isProcessRunning: (pid: number) => boolean;
   stopProcess: (pid: number) => Promise<void>;
-  openUrl: (url: string) => OpenMode;
+  openDesktopApp: (filePath: string) => boolean;
   resolveUpdateStatus: () => Promise<UpdateStatus>;
   log: (message: string) => void;
   error: (message: string) => void;
 }
-
-type OpenMode =
-  | "browser"
-  | "chrome-app"
-  | "disabled"
-  | "existing-window"
-  | "none";
 
 interface EnsureRunningResult {
   server: {
@@ -115,6 +108,17 @@ interface EnsureRunningResult {
 interface ResolvedTargetPath {
   projectDir: string;
   openPath: string;
+}
+
+interface NativeOpenSession {
+  id: string;
+  filePath: string;
+  projectPath: string;
+  relativePath: string;
+  serverUrl: string;
+  originThreadId: string | null;
+  createdAt: string;
+  expiresAt: string;
 }
 
 interface ReusableServer {
@@ -624,14 +628,6 @@ function suggestCommand(command: string): string | null {
   return suggestion && suggestion.distance <= 3 ? suggestion.candidate : null;
 }
 
-function hasChromeAppMode() {
-  if (process.platform !== "darwin") return false;
-  return (
-    spawnSync("open", ["-Ra", "Google Chrome"], { stdio: "ignore" }).status ===
-    0
-  );
-}
-
 function openDetached(command: string, args: string[]) {
   const child = spawn(command, args, {
     detached: true,
@@ -641,32 +637,100 @@ function openDetached(command: string, args: string[]) {
   child.unref();
 }
 
-function defaultOpenUrl(url: string): OpenMode {
-  if (process.env.ROUGHDRAFT_NO_OPEN === "1") {
-    return "disabled";
+function defaultOpenDesktopApp(filePath: string): boolean {
+  if (process.platform !== "darwin") return false;
+
+  const registeredApp =
+    spawnSync("open", ["-Ra", "Markdown Mode"], {
+      stdio: "ignore",
+    }).status === 0;
+
+  if (registeredApp) {
+    openDetached("open", ["-a", "Markdown Mode", filePath]);
+    return true;
   }
 
-  if (hasChromeAppMode()) {
-    openDetached("open", ["-na", "Google Chrome", "--args", `--app=${url}`]);
-    return "chrome-app";
+  const bundledAppPath = path.join(
+    currentServerRoot,
+    "src-tauri",
+    "target",
+    "release",
+    "bundle",
+    "macos",
+    "Markdown Mode.app",
+  );
+
+  if (fs.existsSync(bundledAppPath)) {
+    openDetached("open", ["-a", bundledAppPath, filePath]);
+    return true;
   }
 
-  if (process.platform === "darwin") {
-    openDetached("open", [url]);
-    return "browser";
+  return false;
+}
+
+export function getNativeOpenSessionsFilePath(
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  const explicitFile = env.ROUGHDRAFT_NATIVE_OPEN_SESSIONS_FILE?.trim();
+  if (explicitFile) {
+    return path.resolve(explicitFile);
   }
 
-  if (process.platform === "linux") {
-    openDetached("xdg-open", [url]);
-    return "browser";
-  }
+  return path.join(os.homedir(), ".markdownmode", "native-open-sessions.json");
+}
 
-  if (process.platform === "win32") {
-    openDetached("cmd", ["/c", "start", "", url]);
-    return "browser";
+function readNativeOpenSessions(filePath: string): NativeOpenSession[] {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(filePath, "utf8")) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(isNativeOpenSession);
+  } catch {
+    return [];
   }
+}
 
-  return "none";
+function isNativeOpenSession(value: unknown): value is NativeOpenSession {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.id === "string" &&
+    typeof candidate.filePath === "string" &&
+    typeof candidate.projectPath === "string" &&
+    typeof candidate.relativePath === "string" &&
+    typeof candidate.serverUrl === "string" &&
+    (candidate.originThreadId === null ||
+      typeof candidate.originThreadId === "string") &&
+    typeof candidate.createdAt === "string" &&
+    typeof candidate.expiresAt === "string"
+  );
+}
+
+function writeNativeOpenSession(
+  deps: CliDependencies,
+  session: Omit<NativeOpenSession, "id" | "createdAt" | "expiresAt">,
+): NativeOpenSession {
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + 5 * 60 * 1000);
+  const nextSession: NativeOpenSession = {
+    ...session,
+    id: crypto.randomUUID(),
+    createdAt: now.toISOString(),
+    expiresAt: expiresAt.toISOString(),
+  };
+  const sessionFile = getNativeOpenSessionsFilePath(deps.env);
+  const existing = readNativeOpenSessions(sessionFile);
+  const liveSessions = existing.filter((candidate) => {
+    if (candidate.filePath === nextSession.filePath) return false;
+    return Date.parse(candidate.expiresAt) > now.getTime();
+  });
+
+  fs.mkdirSync(path.dirname(sessionFile), { recursive: true });
+  fs.writeFileSync(
+    sessionFile,
+    JSON.stringify([...liveSessions, nextSession], null, 2),
+  );
+
+  return nextSession;
 }
 
 function defaultIsProcessRunning(pid: number): boolean {
@@ -734,7 +798,11 @@ function defaultSpawnServerProcess(options: {
       detached: true,
       stdio: "ignore",
       windowsHide: true,
-      env: process.env,
+      env: {
+        ...process.env,
+        ROUGHDRAFT_AGENT_ADAPTER:
+          process.env.ROUGHDRAFT_AGENT_ADAPTER ?? "codex-app",
+      },
     },
   );
 
@@ -762,7 +830,7 @@ export function createCliDependencies(
       overrides.spawnServerProcess ?? defaultSpawnServerProcess,
     isProcessRunning: overrides.isProcessRunning ?? defaultIsProcessRunning,
     stopProcess: overrides.stopProcess ?? defaultStopProcess,
-    openUrl: overrides.openUrl ?? defaultOpenUrl,
+    openDesktopApp: overrides.openDesktopApp ?? defaultOpenDesktopApp,
     resolveUpdateStatus:
       overrides.resolveUpdateStatus ??
       (() => resolveUpdateStatus({ fetchImpl })),
@@ -812,9 +880,7 @@ function printHelp(log: (message: string) => void) {
   log("");
   log("Examples:");
   log("  markdownmode open ./draft.md");
-  log("  markdownmode open ./draft.md --print-url");
   log("  markdownmode open ./draft.md --json");
-  log("  markdownmode open ./draft.md --watch");
   log("  markdownmode watch ./draft.md --json");
   log("  markdownmode status --json");
   log("");
@@ -828,45 +894,37 @@ function printCommandHelp(
 ) {
   if (command === "open") {
     log("Usage:");
-    log(
-      "  markdownmode open <path> [--no-open] [--watch] [--print-url] [--port <port>]",
-    );
+    log("  markdownmode open <path> [--no-open] [--port <port>]");
     log("");
-    log("Opens one Markdown file. Starts Markdown Mode if needed.");
+    log("Opens one Markdown file in the native Markdown Mode app.");
     log("");
     log("Flags:");
     log(
-      "  --no-open            Start/reuse the server without opening a browser",
+      "  --no-open            Start/reuse the server without opening a window",
     );
-    log(
-      "  --print-url          Print only the document URL and do not open it",
-    );
-    log("  --watch              Wait for the legacy Done Reviewing event");
     log("  --no-watch           Compatibility no-op; open returns by default");
     log("  --origin-thread-id <id>");
     log("                       Attach transient agent thread metadata");
     log("  --detached           Ignore CODEX_THREAD_ID for this open");
-    log("  --timeout <seconds>  Maximum watch time; omitted means no timeout");
-    log("  --replay             Allow watch to return retained older events");
     log("  --json               Print machine-readable output");
     log("  --port <port>        Preferred server port");
     log("  --state-file <path>  Server state file");
     log("  --state-dir <dir>    Directory containing server.json");
+    log(
+      "  --print-url          Removed; Markdown Mode no longer opens a web UI",
+    );
+    log(
+      "  --watch              Removed from open; use `markdownmode watch` only for legacy automation",
+    );
     log("");
     log("Environment variables:");
-    log(
-      "  ROUGHDRAFT_HOST       Route open through a hosted Markdown Mode instance",
-    );
-    log("                        (remote mode). The CLI registers a session,");
-    log("                        opens an SSE channel, and writes save events");
-    log("                        back to disk.");
     log(
       "  ROUGHDRAFT_TOKEN      Bearer token sent on remote-document requests.",
     );
     log("                        Required when the hosted server binds to a");
     log("                        non-loopback host. Must match the value the");
     log("                        hosted server was started with.");
-    log("  ROUGHDRAFT_NO_OPEN    Set to 1 to suppress browser launch.");
+    log("  ROUGHDRAFT_NO_OPEN    Set to 1 to suppress native app launch.");
     log("  CODEX_THREAD_ID       Attached to the opened document unless");
     log("                        --detached is passed.");
     log("  ROUGHDRAFT_BIND_HOST  Comma-separated bind hosts for the hosted");
@@ -1074,21 +1132,6 @@ function buildLoopbackUrl(host: string, port: number, pathname = "/"): URL {
   return new URL(`http://${baseHost}:${port}${pathname}`);
 }
 
-function buildTargetUrl(
-  baseUrl: string,
-  openPath: string,
-  options?: { originThreadId?: string | null },
-): string {
-  const url = new URL(baseUrl);
-
-  url.pathname = "/";
-  url.searchParams.set("path", openPath);
-  if (options?.originThreadId) {
-    url.searchParams.set("originThreadId", options.originThreadId);
-  }
-  return url.toString();
-}
-
 function originThreadIdForOpen(
   env: NodeJS.ProcessEnv,
   options: Pick<ParsedCommandOptions, "detached" | "originThreadId">,
@@ -1103,286 +1146,12 @@ function originThreadIdForOpen(
   return envThreadId.length > 0 ? envThreadId : null;
 }
 
-interface SseEvent {
-  event: string;
-  data: string;
-}
-
-interface ParsedSseChunk {
-  events: SseEvent[];
-  remainder: string;
-}
-
-function parseSseEvents(buffer: string): ParsedSseChunk {
-  // Normalize CRLF to LF up front so the rest of the parser can treat \n
-  // as the only line terminator. SSE allows \r\n; some proxies rewrite it.
-  const normalized = buffer.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-  const events: SseEvent[] = [];
-  let cursor = 0;
-  while (true) {
-    const blank = normalized.indexOf("\n\n", cursor);
-    if (blank === -1) break;
-    const block = normalized.slice(cursor, blank);
-    let eventName = "message";
-    const dataLines: string[] = [];
-    for (const line of block.split("\n")) {
-      if (line.startsWith("event: ")) {
-        eventName = line.slice(7).trim();
-      } else if (line.startsWith("data: ")) {
-        dataLines.push(line.slice(6));
-      }
-    }
-    if (dataLines.length > 0) {
-      events.push({ event: eventName, data: dataLines.join("\n") });
-    }
-    cursor = blank + 2;
-  }
-  return { events, remainder: normalized.slice(cursor) };
-}
-
-async function atomicWriteFile(
-  targetPath: string,
-  content: string,
-): Promise<void> {
-  const tmpPath = `${targetPath}.tmp-${process.pid}-${Date.now()}`;
-  await fs.promises.writeFile(tmpPath, content);
-  await fs.promises.rename(tmpPath, targetPath);
-}
-
-function appendTokenToViewerUrl(viewerUrl: string, token: string): string {
-  if (token.length === 0) return viewerUrl;
-  try {
-    const parsed = new URL(viewerUrl);
-    parsed.searchParams.set("token", token);
-    return parsed.toString();
-  } catch {
-    // Fall back to a simple suffix if the URL is malformed; the browser will
-    // reject it the same way it would have without the token.
-    const separator = viewerUrl.includes("?") ? "&" : "?";
-    return `${viewerUrl}${separator}token=${encodeURIComponent(token)}`;
-  }
-}
-
-interface RemoteOpenOptions {
-  host: string;
-  openPath: string;
-  noOpen: boolean;
-  printUrl: boolean;
-  json: boolean;
-}
-
-async function runRemoteOpen(
-  deps: CliDependencies,
-  options: RemoteOpenOptions,
-): Promise<number> {
-  const baseUrl = options.host.replace(/\/$/, "");
-  const remoteToken =
-    typeof deps.env.ROUGHDRAFT_TOKEN === "string"
-      ? deps.env.ROUGHDRAFT_TOKEN.trim()
-      : "";
-  const authHeaders: Record<string, string> =
-    remoteToken.length > 0 ? { Authorization: `Bearer ${remoteToken}` } : {};
-
-  let content: string;
-  try {
-    content = await fs.promises.readFile(options.openPath, "utf-8");
-  } catch (error) {
-    deps.error(
-      error instanceof Error
-        ? error.message
-        : `Could not read ${options.openPath}`,
-    );
-    return 1;
-  }
-
-  const sessionId = crypto.randomUUID();
-
-  const REGISTER_TIMEOUT_MS = 10_000;
-  let registerResponse: Response;
-  try {
-    registerResponse = await deps.fetchImpl(`${baseUrl}/api/remote-document`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...authHeaders },
-      body: JSON.stringify({
-        sessionId,
-        originPath: options.openPath,
-        content,
-      }),
-      signal: AbortSignal.timeout(REGISTER_TIMEOUT_MS),
-    });
-  } catch (error) {
-    deps.error(
-      `Could not register remote session at ${baseUrl}: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-    return 1;
-  }
-
-  if (!registerResponse.ok) {
-    if (registerResponse.status === 401) {
-      deps.error(
-        `Remote host rejected the session register (HTTP 401). Set ROUGHDRAFT_TOKEN to the token configured on the host before retrying.`,
-      );
-    } else {
-      deps.error(
-        `Remote host rejected the session register (HTTP ${registerResponse.status}).`,
-      );
-    }
-    return 1;
-  }
-
-  const registerPayload = (await registerResponse.json()) as {
-    id?: string;
-    version?: string;
-    viewerUrl?: string;
-  };
-
-  // The browser viewer must include the same token so its fetches and
-  // EventSource connection authenticate. The server's viewerUrl response field
-  // is unaware of the token (it doesn't see secrets in plaintext over the wire
-  // unless we add them); the CLI knows the token and can append it.
-  const baseViewer =
-    typeof registerPayload.viewerUrl === "string"
-      ? registerPayload.viewerUrl
-      : `${baseUrl}/?session=${encodeURIComponent(sessionId)}`;
-  const viewerUrl = appendTokenToViewerUrl(baseViewer, remoteToken);
-
-  if (options.printUrl) {
-    deps.log(viewerUrl);
-    return 0;
-  }
-
-  if (!options.noOpen && deps.env.ROUGHDRAFT_NO_OPEN !== "1") {
-    deps.openUrl(viewerUrl);
-  }
-
-  if (options.json) {
-    emitJson(deps.log, {
-      opened: true,
-      mode: "remote",
-      sessionId,
-      url: viewerUrl,
-      host: baseUrl,
-      path: options.openPath,
-    });
-  } else {
-    deps.log(`Opened remote Markdown Mode session: ${viewerUrl}`);
-    deps.log(`Holding session open for ${options.openPath}. Ctrl-C to exit.`);
-  }
-
-  const SSE_CONNECT_TIMEOUT_MS = 10_000;
-  const eventsUrl = new URL(
-    `/api/remote-document/${encodeURIComponent(sessionId)}/events`,
-    baseUrl,
-  );
-  eventsUrl.searchParams.set("role", "cli");
-
-  let eventsResponse: Response;
-  try {
-    eventsResponse = await deps.fetchImpl(eventsUrl.toString(), {
-      headers: { Accept: "text/event-stream", ...authHeaders },
-      signal: AbortSignal.timeout(SSE_CONNECT_TIMEOUT_MS),
-    });
-  } catch (error) {
-    deps.error(
-      `Lost connection to remote host: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-    return 1;
-  }
-
-  if (!eventsResponse.ok || !eventsResponse.body) {
-    deps.error(
-      `Could not open remote event stream (HTTP ${eventsResponse.status}).`,
-    );
-    return 1;
-  }
-
-  const reader = eventsResponse.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-
-  try {
-    while (true) {
-      let chunk: ReadableStreamReadResult<Uint8Array>;
-      try {
-        chunk = await reader.read();
-      } catch {
-        break;
-      }
-      if (chunk.done) break;
-      buffer += decoder.decode(chunk.value, { stream: true });
-      const parsed = parseSseEvents(buffer);
-      buffer = parsed.remainder;
-      for (const event of parsed.events) {
-        if (event.event === "save") {
-          let payload: { content?: unknown } = {};
-          try {
-            payload = JSON.parse(event.data) as { content?: unknown };
-          } catch {
-            continue;
-          }
-          if (typeof payload.content === "string") {
-            try {
-              await atomicWriteFile(options.openPath, payload.content);
-              if (!options.json) {
-                deps.log(`Saved ${options.openPath} from remote.`);
-              }
-            } catch (error) {
-              deps.error(
-                `Failed to write ${options.openPath}: ${
-                  error instanceof Error ? error.message : String(error)
-                }`,
-              );
-            }
-          }
-        }
-      }
-    }
-  } finally {
-    try {
-      reader.releaseLock();
-    } catch {
-      // The stream may already be in an errored state; ignore.
-    }
-  }
-
-  if (!options.json) {
-    deps.log("Remote session disconnected.");
-  }
-  return 0;
-}
-
-async function sendOpenRequestToExistingWindow(
-  deps: CliDependencies,
-  baseUrl: string,
-  targetUrl: string,
-  openPath: string,
-): Promise<boolean> {
-  try {
-    const requestUrl = new URL("/api/open-request", baseUrl);
-    const response = await deps.fetchImpl(requestUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path: openPath, url: targetUrl }),
-      signal: AbortSignal.timeout(STATUS_TIMEOUT_MS),
-    });
-
-    if (!response.ok) {
-      return false;
-    }
-
-    const payload = (await response.json()) as { delivered?: unknown };
-    return payload.delivered === true;
-  } catch {
-    return false;
-  }
-}
-
-function resolveTargetPath(inputPath: string): ResolvedTargetPath {
-  const resolvedPath = path.resolve(inputPath);
+function resolveTargetPath(
+  inputPath: string,
+  cwd = process.cwd(),
+): ResolvedTargetPath {
+  const resolvedCwd = path.resolve(cwd);
+  const resolvedPath = path.resolve(resolvedCwd, inputPath);
   const looksLikeMarkdownFile = resolvedPath.toLowerCase().endsWith(".md");
 
   try {
@@ -1399,7 +1168,9 @@ function resolveTargetPath(inputPath: string): ResolvedTargetPath {
       }
 
       return {
-        projectDir: path.dirname(resolvedPath),
+        projectDir: pathIsInsideOrSame(resolvedPath, resolvedCwd)
+          ? resolvedCwd
+          : path.dirname(resolvedPath),
         openPath: resolvedPath,
       };
     }
@@ -1420,6 +1191,14 @@ function resolveTargetPath(inputPath: string): ResolvedTargetPath {
   }
 
   throw new Error(`Unsupported path: ${resolvedPath}`);
+}
+
+function pathIsInsideOrSame(candidate: string, parent: string): boolean {
+  const relative = path.relative(parent, candidate);
+  return (
+    relative === "" ||
+    (!relative.startsWith("..") && !path.isAbsolute(relative))
+  );
 }
 
 export function getServerStateFilePath(
@@ -1918,7 +1697,7 @@ async function runDoctor(
     preferredPortResponds: Boolean(preferredStatus),
     serverRoot: trackedStatus?.serverRoot ?? null,
     serverRootMatches,
-    browserOpeningDisabled: deps.env.ROUGHDRAFT_NO_OPEN === "1",
+    desktopAppOpeningDisabled: deps.env.ROUGHDRAFT_NO_OPEN === "1",
     cwd: deps.cwd,
     cwdReadable,
     devWrapper:
@@ -1966,7 +1745,7 @@ async function runDoctor(
     `Server root matches checkout: ${report.serverRootMatches ? "yes" : "no"}`,
   );
   deps.log(
-    `Browser opening disabled: ${report.browserOpeningDisabled ? "yes" : "no"}`,
+    `Desktop app opening disabled: ${report.desktopAppOpeningDisabled ? "yes" : "no"}`,
   );
   deps.log(`Current directory readable: ${report.cwdReadable ? "yes" : "no"}`);
   if (report.devWrapper) {
@@ -2661,11 +2440,25 @@ export async function runCli(
         return USAGE_ERROR;
       }
 
+      if (options.printUrl) {
+        deps.error(
+          "URL browser mode has been removed. Use `markdownmode open <path>` to open the native Markdown Mode app.",
+        );
+        return USAGE_ERROR;
+      }
+
+      if (options.watch) {
+        deps.error(
+          "The blocking review wait flow is no longer part of `markdownmode open`. Use `markdownmode watch <path>` only for legacy automation.",
+        );
+        return USAGE_ERROR;
+      }
+
       deps = applyCliEnvOverrides(deps, options);
       const json = parsed.global.json || options.json;
       let resolvedTarget: ResolvedTargetPath;
       try {
-        resolvedTarget = resolveTargetPath(target);
+        resolvedTarget = resolveTargetPath(target, deps.cwd);
       } catch (error) {
         deps.error(error instanceof Error ? error.message : "Invalid path.");
         return 1;
@@ -2678,119 +2471,92 @@ export async function runCli(
           ? deps.env.ROUGHDRAFT_HOST.trim()
           : "";
       if (remoteHost.length > 0) {
-        return runRemoteOpen(deps, {
-          host: remoteHost,
-          openPath,
-          noOpen: options.noOpen,
-          printUrl: options.printUrl,
-          json,
-        });
+        deps.error(
+          "Remote browser open mode has been removed from `markdownmode open`.",
+        );
+        return USAGE_ERROR;
       }
+
+      const originThreadId = originThreadIdForOpen(deps.env, options);
+      const shouldTryDesktopApp =
+        !options.noOpen && deps.env.ROUGHDRAFT_NO_OPEN !== "1";
 
       const liveDevFrontend = await resolveLiveDevFrontendBaseUrl(deps);
       let result: EnsureRunningResult | null = null;
       let baseUrl: string;
 
-      if (liveDevFrontend) {
+      if (liveDevFrontend?.apiUrl) {
+        baseUrl = liveDevFrontend.apiUrl;
+      } else if (liveDevFrontend) {
         baseUrl = liveDevFrontend.frontendUrl;
       } else {
         result = await ensureServerRunning(deps, { projectDir });
         baseUrl = buildPublicBaseUrl(result.server.port);
       }
 
-      const originThreadId = originThreadIdForOpen(deps.env, options);
-      const targetUrl = buildTargetUrl(baseUrl, openPath, { originThreadId });
-      let openMode: OpenMode = "disabled";
-      if (!options.noOpen && deps.env.ROUGHDRAFT_NO_OPEN !== "1") {
-        openMode = (await sendOpenRequestToExistingWindow(
-          deps,
-          baseUrl,
-          targetUrl,
-          openPath,
-        ))
-          ? "existing-window"
-          : deps.openUrl(targetUrl);
-      }
-
       if (result?.portChanged) {
         const message = `Preferred port ${getPreferredPort(deps.env)} is busy, using ${result.server.port}.`;
-        if (options.printUrl) {
-          deps.error(message);
-        } else if (!json) {
+        if (!json) {
           deps.log(message);
         }
       }
 
-      if (options.printUrl) {
-        deps.log(targetUrl);
-        return 0;
-      }
+      const relativePath =
+        path.relative(projectDir, openPath) || path.basename(openPath);
+      const nativeSession = writeNativeOpenSession(deps, {
+        filePath: openPath,
+        projectPath: projectDir,
+        relativePath,
+        serverUrl: baseUrl,
+        originThreadId,
+      });
 
-      const shouldWatch = options.watch && !options.printUrl;
-
-      if (shouldWatch) {
-        if (!json) {
-          if (openMode === "chrome-app") {
-            deps.log(
-              `Opened Markdown Mode in a Chrome app window: ${targetUrl}`,
-            );
-          } else if (openMode === "existing-window") {
-            deps.log(`Reused an existing Markdown Mode window: ${targetUrl}`);
-          } else if (openMode === "browser") {
-            deps.log(
-              `Opened Markdown Mode in the default browser: ${targetUrl}`,
-            );
-          } else {
-            deps.log(`Markdown Mode is running at ${targetUrl}`);
-          }
-          deps.log("Waiting for Done Reviewing...");
+      if (shouldTryDesktopApp && deps.openDesktopApp(openPath)) {
+        if (json) {
+          emitJson(deps.log, {
+            opened: true,
+            path: openPath,
+            projectPath: projectDir,
+            relativePath,
+            serverUrl: baseUrl,
+            originThreadId,
+            nativeSessionId: nativeSession.id,
+            openMode: "desktop-app",
+          });
+          return 0;
         }
 
-        const watchOptions: ParsedWatchOptions = {
-          batchWindowSeconds: options.batchWindowSeconds,
-          help: false,
-          json,
-          positionals: [target],
-          replay: options.replay,
-          serverUrl: liveDevFrontend?.apiUrl ?? undefined,
-          stateDir: options.stateDir,
-          stateFile: options.stateFile,
-          timeoutSeconds: options.timeoutSeconds,
-        };
-        shouldPrintUpdateNotice = false;
-        return runWatch(deps, target, watchOptions, json);
+        shouldPrintUpdateNotice = true;
+        deps.log(`Opened Markdown Mode app: ${openPath}`);
+        return 0;
       }
 
       if (json) {
         emitJson(deps.log, {
-          opened: true,
-          url: targetUrl,
+          opened: false,
           serverUrl: baseUrl,
           path: openPath,
+          projectPath: projectDir,
+          relativePath,
           originThreadId,
-          openMode,
+          nativeSessionId: nativeSession.id,
+          openMode: "disabled",
         });
         return 0;
       }
 
+      if (!shouldTryDesktopApp) {
+        shouldPrintUpdateNotice = true;
+        deps.log(`Markdown Mode server ready: ${baseUrl}`);
+        deps.log(`Prepared native open session for: ${openPath}`);
+        return 0;
+      }
+
       shouldPrintUpdateNotice = true;
-      if (openMode === "chrome-app") {
-        deps.log(`Opened Markdown Mode in a Chrome app window: ${targetUrl}`);
-        return 0;
-      }
-
-      if (openMode === "existing-window") {
-        deps.log(`Reused an existing Markdown Mode window: ${targetUrl}`);
-        return 0;
-      }
-
-      if (openMode === "browser") {
-        deps.log(`Opened Markdown Mode in the default browser: ${targetUrl}`);
-        return 0;
-      }
-
-      deps.log(`Markdown Mode is running at ${targetUrl}`);
-      return 0;
+      deps.error(
+        "Could not open Markdown Mode.app. Install or rebuild the macOS app, then run `markdownmode open <path>` again.",
+      );
+      return 1;
     }
 
     return USAGE_ERROR;

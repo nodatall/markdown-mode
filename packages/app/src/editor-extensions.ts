@@ -426,10 +426,12 @@ const CriticChange = Mark.create({
 interface CommentHighlightMeta {
   selectedCommentId: string | null;
   hoveredCommentId: string | null;
+  workingCommentIds?: string[];
 }
 
 interface CommentHighlightPluginState extends CommentHighlightMeta {
   decorations: DecorationSet;
+  workingCommentIds: string[];
 }
 
 interface CriticChangeHighlightMeta {
@@ -450,6 +452,7 @@ function createCommentHighlightDecorations(
   doc: ProseMirrorNode,
   selectedCommentId: string | null,
   hoveredCommentId: string | null,
+  workingCommentIds: string[] = [],
 ) {
   const commentMarkType = doc.type.schema.marks.commentRef;
   const changeMarkType = doc.type.schema.marks.criticChange;
@@ -478,9 +481,14 @@ function createCommentHighlightDecorations(
       !!selectedCommentId && commentIds.includes(selectedCommentId);
     const isHovered =
       !!hoveredCommentId && commentIds.includes(hoveredCommentId);
+    const isWorking = commentIds.some((commentId) =>
+      workingCommentIds.includes(commentId),
+    );
     const classNames = ["comment-decoration"];
 
-    if (isSelected) {
+    if (isWorking) {
+      classNames.push("comment-decoration-working");
+    } else if (isSelected) {
       classNames.push("comment-decoration-active");
     } else if (isHovered) {
       classNames.push("comment-decoration-hovered");
@@ -496,11 +504,11 @@ function createCommentHighlightDecorations(
     decorations.push(
       Decoration.inline(pos, pos + node.nodeSize, {
         class: classNames.join(" "),
-        "data-testid": classNames.includes(
-          "comment-decoration-on-critic-change",
-        )
-          ? "comment-decoration-on-critic-change"
-          : "comment-decoration",
+        "data-testid": isWorking
+          ? "comment-decoration-working"
+          : classNames.includes("comment-decoration-on-critic-change")
+            ? "comment-decoration-on-critic-change"
+            : "comment-decoration",
       }),
     );
   });
@@ -519,10 +527,12 @@ const CommentHighlight = Extension.create({
           init: (_, state) => ({
             selectedCommentId: null,
             hoveredCommentId: null,
+            workingCommentIds: [],
             decorations: createCommentHighlightDecorations(
               state.doc,
               null,
               null,
+              [],
             ),
           }),
           apply: (tr, pluginState) => {
@@ -542,14 +552,20 @@ const CommentHighlight = Extension.create({
               meta !== undefined
                 ? meta.hoveredCommentId
                 : pluginState.hoveredCommentId;
+            const workingCommentIds =
+              meta !== undefined
+                ? (meta.workingCommentIds ?? [])
+                : pluginState.workingCommentIds;
 
             return {
               selectedCommentId,
               hoveredCommentId,
+              workingCommentIds,
               decorations: createCommentHighlightDecorations(
                 tr.doc,
                 selectedCommentId,
                 hoveredCommentId,
+                workingCommentIds,
               ),
             };
           },
