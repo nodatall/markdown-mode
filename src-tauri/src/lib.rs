@@ -1,5 +1,6 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{
+    env,
     fs,
     path::{Path, PathBuf},
     sync::Mutex,
@@ -22,6 +23,9 @@ struct MarkdownFile {
     base_dir: String,
     contents: String,
     modified: u128,
+    server_url: Option<String>,
+    origin_thread_id: Option<String>,
+    open_session_id: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -29,6 +33,19 @@ struct MarkdownFile {
 struct WriteMarkdownFileResult {
     saved: Option<MarkdownFile>,
     conflict: Option<MarkdownFile>,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NativeOpenSession {
+    id: String,
+    file_path: String,
+    project_path: String,
+    relative_path: String,
+    server_url: String,
+    origin_thread_id: Option<String>,
+    created_at: String,
+    expires_at: String,
 }
 
 fn modified_millis(path: &Path) -> Result<u128, String> {
@@ -72,7 +89,84 @@ fn read_path(path: PathBuf) -> Result<MarkdownFile, String> {
         base_dir: base_dir.to_string_lossy().to_string(),
         contents,
         modified: modified_millis(&canonical_path)?,
+        server_url: None,
+        origin_thread_id: None,
+        open_session_id: None,
     })
+}
+
+fn native_open_sessions_path() -> Option<PathBuf> {
+    env::var_os("HOME").map(|home| {
+        PathBuf::from(home)
+            .join(".markdownmode")
+            .join("native-open-sessions.json")
+    })
+}
+
+fn read_native_open_sessions(path: &Path) -> Vec<NativeOpenSession> {
+    let Ok(contents) = fs::read_to_string(path) else {
+        return Vec::new();
+    };
+
+    serde_json::from_str::<Vec<NativeOpenSession>>(&contents).unwrap_or_default()
+}
+
+fn write_native_open_sessions(path: &Path, sessions: &[NativeOpenSession]) {
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+
+    if let Ok(contents) = serde_json::to_string_pretty(sessions) {
+        let _ = fs::write(path, contents);
+    }
+}
+
+fn consume_native_open_session(file_path: &Path) -> Option<NativeOpenSession> {
+    let session_path = native_open_sessions_path()?;
+    let sessions = read_native_open_sessions(&session_path);
+    if sessions.is_empty() {
+        return None;
+    }
+
+    let now_millis = chrono::Utc::now().timestamp_millis();
+    let canonical_file_path = file_path
+        .canonicalize()
+        .unwrap_or_else(|_| file_path.to_path_buf())
+        .to_string_lossy()
+        .to_string();
+    let mut matched: Option<NativeOpenSession> = None;
+    let mut retained: Vec<NativeOpenSession> = Vec::new();
+
+    for session in sessions {
+        let expires_at = chrono::DateTime::parse_from_rfc3339(&session.expires_at)
+            .map(|date| date.timestamp_millis())
+            .unwrap_or(0);
+        let is_expired = expires_at <= now_millis;
+        let is_match = session.file_path == canonical_file_path;
+
+        if is_match && !is_expired && matched.is_none() {
+            matched = Some(session);
+            continue;
+        }
+
+        if !is_expired && !is_match {
+            retained.push(session);
+        }
+    }
+
+    write_native_open_sessions(&session_path, &retained);
+    matched
+}
+
+fn attach_native_open_session(mut file: MarkdownFile) -> MarkdownFile {
+    let session = consume_native_open_session(Path::new(&file.path));
+    if let Some(session) = session {
+        file.server_url = Some(session.server_url);
+        file.origin_thread_id = session.origin_thread_id;
+        file.open_session_id = Some(session.id);
+    }
+
+    file
 }
 
 fn update_window_title(window: &Window, file_name: &str) {
@@ -82,6 +176,7 @@ fn update_window_title(window: &Window, file_name: &str) {
 fn open_path(app: &tauri::AppHandle, path: PathBuf) {
     match read_path(path) {
         Ok(file) => {
+            let file = attach_native_open_session(file);
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_title(&file.file_name);
             }
@@ -165,6 +260,7 @@ fn open_markdown_dialog(window: Window) -> Result<Option<MarkdownFile>, String> 
     };
 
     let file = read_path(path)?;
+    let file = attach_native_open_session(file);
     update_window_title(&window, &file.file_name);
 
     Ok(Some(file))

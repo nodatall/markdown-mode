@@ -3,7 +3,7 @@ import type { Mark as ProseMirrorMark } from "@tiptap/pm/model";
 import { TextSelection } from "@tiptap/pm/state";
 import type { Editor } from "@tiptap/react";
 import { EditorContent, useEditor, useEditorState } from "@tiptap/react";
-import { Plus } from "lucide-react";
+import { Loader2, Plus } from "lucide-react";
 import {
   type Dispatch,
   memo,
@@ -227,18 +227,17 @@ function DocumentCommentMarkers({
             onMouseEnter={() => onHoverComment(primaryCommentId)}
             onMouseLeave={() => onHoverComment(null)}
           >
-            {isDraftComment ? (
+            {isWorking ? (
+              <Loader2
+                className="size-3.5 animate-spin"
+                strokeWidth={2.5}
+                data-testid={`document-comment-marker-${primaryCommentId}-working`}
+              />
+            ) : isDraftComment ? (
               <Plus className="size-3.5" strokeWidth={2.5} />
             ) : (
               savedGroupIndex + 1
             )}
-            {isWorking ? (
-              <span
-                className="-right-0.5 -top-0.5 absolute size-2.5 animate-pulse rounded-full border border-white bg-sky-500 dark:border-slate-950 dark:bg-sky-300"
-                data-testid={`document-comment-marker-${primaryCommentId}-working`}
-                aria-hidden="true"
-              />
-            ) : null}
           </button>
         );
       })}
@@ -1402,9 +1401,10 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
       editor.state.tr.setMeta(commentHighlightPluginKey, {
         selectedCommentId,
         hoveredCommentId: effectiveHoveredCommentId,
+        workingCommentIds: [...(workingCommentIds ?? new Set<string>())],
       }),
     );
-  }, [editor, hoveredCommentId, selectedCommentId]);
+  }, [editor, hoveredCommentId, selectedCommentId, workingCommentIds]);
 
   useEffect(() => {
     if (!editor) return;

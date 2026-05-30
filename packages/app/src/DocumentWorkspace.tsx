@@ -336,7 +336,7 @@ export function DocumentWorkspace({
         console.error("Failed to submit agent comment task:", error);
         setAgentCommentState("error");
         setAgentCommentStatusText(
-          "Roughdraft could not submit this comment to an agent.",
+          "Markdown Mode could not submit this comment to an agent.",
         );
         return false;
       }
@@ -490,7 +490,7 @@ export function DocumentWorkspace({
                   </div>
                   <p className="mt-1 text-sm leading-6 text-stone-600 dark:text-slate-300">
                     {agentCommentStatusText ||
-                      "Roughdraft submitted the saved comment as an agent task."}
+                      "Markdown Mode submitted the saved comment as an agent task."}
                   </p>
                 </div>
               </div>

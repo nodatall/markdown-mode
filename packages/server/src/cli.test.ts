@@ -8,6 +8,7 @@ import { createApp } from "./index";
 import {
   createCliDependencies,
   ensureServerRunning,
+  getNativeOpenSessionsFilePath,
   getServerStateFilePath,
   runCli,
 } from "./cli";
@@ -73,6 +74,7 @@ describe("cli", () => {
   let stateDir: string;
   let projectDir: string;
   let devFrontendStateFile: string;
+  let previousNativeSessionsFile: string | undefined;
   let nextPid: number;
   let runningPids: Set<number>;
   let serverByPid: Map<number, StartedServer>;
@@ -82,23 +84,22 @@ describe("cli", () => {
   );
 
   beforeEach(() => {
+    previousNativeSessionsFile =
+      process.env.ROUGHDRAFT_NATIVE_OPEN_SESSIONS_FILE;
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "markdownmode-cli-"));
     stateDir = path.join(tempDir, "state");
     projectDir = path.join(tempDir, "project");
     devFrontendStateFile = path.join(tempDir, "dev-frontend.json");
+    process.env.ROUGHDRAFT_NATIVE_OPEN_SESSIONS_FILE = path.join(
+      stateDir,
+      "native-open-sessions.json",
+    );
     fs.mkdirSync(projectDir, { recursive: true });
     nextPid = 1000;
     runningPids = new Set<number>();
     serverByPid = new Map<number, StartedServer>();
     portByPid = new Map<number, number>();
   });
-
-  function expectedOpenUrl(baseUrl: string, documentPath: string): string {
-    const url = new URL(baseUrl);
-    url.pathname = "/";
-    url.searchParams.set("path", documentPath);
-    return url.toString();
-  }
 
   function parseOnlyJsonLog<T>(logs: string[]): T {
     expect(logs).toHaveLength(1);
@@ -119,13 +120,19 @@ describe("cli", () => {
     await Promise.all(
       Array.from(serverByPid.values(), (server) => server.close()),
     );
+    if (previousNativeSessionsFile === undefined) {
+      delete process.env.ROUGHDRAFT_NATIVE_OPEN_SESSIONS_FILE;
+    } else {
+      process.env.ROUGHDRAFT_NATIVE_OPEN_SESSIONS_FILE =
+        previousNativeSessionsFile;
+    }
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
   function createTestDependencies() {
     const logs: string[] = [];
     const errors: string[] = [];
-    let lastOpenedUrl: string | null = null;
+    let lastOpenedDesktopPath: string | null = null;
     let spawnCount = 0;
 
     const deps = createCliDependencies({
@@ -157,9 +164,9 @@ describe("cli", () => {
       },
       log: (message) => logs.push(message),
       error: (message) => errors.push(message),
-      openUrl: (url) => {
-        lastOpenedUrl = url;
-        return "disabled";
+      openDesktopApp: (filePath) => {
+        lastOpenedDesktopPath = filePath;
+        return true;
       },
       resolveUpdateStatus: noUpdateStatus,
       spawnServerProcess: async ({ port, projectDir: nextProjectDir }) => {
@@ -194,7 +201,7 @@ describe("cli", () => {
       deps,
       logs,
       errors,
-      getLastOpenedUrl: () => lastOpenedUrl,
+      getLastOpenedDesktopPath: () => lastOpenedDesktopPath,
       getSpawnCount: () => spawnCount,
     };
   }
@@ -226,7 +233,7 @@ describe("cli", () => {
     expect(typeof persisted.startedAt).toBe("string");
   });
 
-  it("auto-starts from open and opens the requested markdown file URL", async () => {
+  it("auto-starts from open and opens the requested markdown file in the native app", async () => {
     const test = createTestDependencies();
     const documentPath = path.join(projectDir, "draft.md");
     fs.writeFileSync(documentPath, "# Draft\n");
@@ -241,9 +248,15 @@ describe("cli", () => {
 
     expect(exitCode).toBe(0);
     expect(test.getSpawnCount()).toBe(1);
-    expect(test.getLastOpenedUrl()).toBe(
-      expectedOpenUrl(`http://localhost:${persisted.port}`, documentPath),
-    );
+    expect(test.getLastOpenedDesktopPath()).toBe(documentPath);
+    const sessions = JSON.parse(
+      fs.readFileSync(getNativeOpenSessionsFilePath(test.deps.env), "utf8"),
+    ) as Array<{ filePath: string; serverUrl: string; relativePath: string }>;
+    expect(sessions.at(-1)).toMatchObject({
+      filePath: documentPath,
+      serverUrl: `http://localhost:${persisted.port}`,
+      relativePath: "draft.md",
+    });
     expect(fs.existsSync(getServerStateFilePath(test.deps.env))).toBeTruthy();
   });
 
@@ -309,12 +322,12 @@ describe("cli", () => {
     expect(test.logs).not.toContain("registry unavailable");
   });
 
-  it("reuses a connected document window before opening another browser window", async () => {
+  it("does not post browser open requests for native app opens", async () => {
     const documentPath = path.join(projectDir, "draft.md");
     fs.writeFileSync(documentPath, "# Draft\n");
 
     let postedOpenRequest: { path?: string; url?: string } | null = null;
-    let lastOpenedUrl: string | null = null;
+    let openedDesktopPath: string | null = null;
     const deps = createCliDependencies({
       env: {
         ...process.env,
@@ -364,9 +377,9 @@ describe("cli", () => {
       spawnServerProcess: async () => {
         throw new Error("should not spawn");
       },
-      openUrl: (url) => {
-        lastOpenedUrl = url;
-        return "browser";
+      openDesktopApp: (filePath) => {
+        openedDesktopPath = filePath;
+        return true;
       },
       log: () => {},
       error: () => {},
@@ -375,17 +388,48 @@ describe("cli", () => {
     const exitCode = await runCli(["open", documentPath, "--no-watch"], deps);
 
     expect(exitCode).toBe(0);
-    expect(postedOpenRequest).toEqual({
-      path: documentPath,
-      url: expectedOpenUrl(
-        `http://localhost:${ROUGHDRAFT_DEFAULT_PORT}`,
-        documentPath,
-      ),
-    });
-    expect(lastOpenedUrl).toBeNull();
+    expect(postedOpenRequest).toBeNull();
+    expect(openedDesktopPath).toBe(documentPath);
   });
 
-  it("prints only the document URL from open --print-url", async () => {
+  it("opens the native Markdown Mode app after starting the server session", async () => {
+    const test = createTestDependencies();
+    const documentPath = path.join(projectDir, "draft.md");
+    fs.writeFileSync(documentPath, "# Draft\n");
+    let openedDesktopPath: string | null = null;
+
+    const exitCode = await runCli(["open", documentPath], {
+      ...test.deps,
+      openDesktopApp: (filePath) => {
+        openedDesktopPath = filePath;
+        return true;
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(openedDesktopPath).toBe(documentPath);
+    expect(test.getSpawnCount()).toBe(1);
+    expect(test.logs).toContain(`Opened Markdown Mode app: ${documentPath}`);
+  });
+
+  it("does not fall back to a browser when the native app is unavailable", async () => {
+    const test = createTestDependencies();
+    const documentPath = path.join(projectDir, "draft.md");
+    fs.writeFileSync(documentPath, "# Draft\n");
+
+    const exitCode = await runCli(["open", documentPath], {
+      ...test.deps,
+      openDesktopApp: () => false,
+    });
+
+    expect(exitCode).toBe(1);
+    expect(test.getSpawnCount()).toBe(1);
+    expect(test.errors.join("\n")).toContain(
+      "Could not open Markdown Mode.app",
+    );
+  });
+
+  it("rejects open --print-url because web UI mode is removed", async () => {
     const test = createTestDependencies();
     const documentPath = path.join(projectDir, "draft.md");
     fs.writeFileSync(documentPath, "# Draft\n");
@@ -394,37 +438,39 @@ describe("cli", () => {
       ["open", documentPath, "--print-url"],
       test.deps,
     );
-    const persisted = JSON.parse(
-      fs.readFileSync(getServerStateFilePath(test.deps.env), "utf8"),
-    ) as { port: number };
-
-    expect(exitCode).toBe(0);
-    expect(test.logs).toEqual([
-      expectedOpenUrl(`http://localhost:${persisted.port}`, documentPath),
-    ]);
-    expect(test.getLastOpenedUrl()).toBeNull();
+    expect(exitCode).toBe(2);
+    expect(test.errors.join("\n")).toContain(
+      "URL browser mode has been removed",
+    );
+    expect(test.getLastOpenedDesktopPath()).toBeNull();
   });
 
-  it("adds explicit origin thread metadata to the opened URL", async () => {
+  it("adds explicit origin thread metadata to the native open session", async () => {
     const test = createTestDependencies();
     const documentPath = path.join(projectDir, "draft.md");
     fs.writeFileSync(documentPath, "# Draft\n");
 
     const exitCode = await runCli(
-      ["open", documentPath, "--print-url", "--origin-thread-id", "thread-1"],
+      ["open", documentPath, "--origin-thread-id", "thread-1"],
       test.deps,
     );
-    const openedUrl = new URL(test.logs[0] ?? "");
+    const sessions = JSON.parse(
+      fs.readFileSync(getNativeOpenSessionsFilePath(test.deps.env), "utf8"),
+    ) as Array<{ filePath: string; originThreadId: string | null }>;
 
     expect(exitCode).toBe(0);
-    expect(openedUrl.searchParams.get("path")).toBe(documentPath);
-    expect(openedUrl.searchParams.get("originThreadId")).toBe("thread-1");
+    expect(sessions.at(-1)).toMatchObject({
+      filePath: documentPath,
+      originThreadId: "thread-1",
+    });
   });
 
   it("uses CODEX_THREAD_ID for attached opens unless detached is requested", async () => {
     const test = createTestDependencies();
     const documentPath = path.join(projectDir, "draft.md");
+    const detachedDocumentPath = path.join(projectDir, "detached.md");
     fs.writeFileSync(documentPath, "# Draft\n");
+    fs.writeFileSync(detachedDocumentPath, "# Detached\n");
     const deps = {
       ...test.deps,
       env: {
@@ -433,23 +479,25 @@ describe("cli", () => {
       },
     };
 
-    const attachedExitCode = await runCli(
-      ["open", documentPath, "--print-url"],
-      deps,
-    );
+    const attachedExitCode = await runCli(["open", documentPath], deps);
     const detachedExitCode = await runCli(
-      ["open", documentPath, "--print-url", "--detached"],
+      ["open", detachedDocumentPath, "--detached"],
       deps,
     );
-    const attachedUrl = new URL(test.logs[0] ?? "");
-    const detachedUrl = new URL(test.logs[1] ?? "");
+    const sessions = JSON.parse(
+      fs.readFileSync(getNativeOpenSessionsFilePath(test.deps.env), "utf8"),
+    ) as Array<{ originThreadId: string | null }>;
 
     expect(attachedExitCode).toBe(0);
     expect(detachedExitCode).toBe(0);
-    expect(attachedUrl.searchParams.get("originThreadId")).toBe(
-      "thread-from-env",
-    );
-    expect(detachedUrl.searchParams.get("originThreadId")).toBeNull();
+    expect(
+      sessions.find((session) => session.filePath === documentPath)
+        ?.originThreadId,
+    ).toBe("thread-from-env");
+    expect(
+      sessions.find((session) => session.filePath === detachedDocumentPath)
+        ?.originThreadId,
+    ).toBeNull();
   });
 
   it("emits JSON from default open --json without waiting", async () => {
@@ -463,22 +511,26 @@ describe("cli", () => {
     ) as { port: number };
     const payload = parseOnlyJsonLog<{
       opened: boolean;
-      url: string;
       serverUrl: string;
       path: string;
+      projectPath: string;
+      relativePath: string;
       openMode: string;
       originThreadId: string | null;
+      nativeSessionId: string;
     }>(test.logs);
 
     expect(exitCode).toBe(0);
-    expect(payload).toEqual({
+    expect(payload).toMatchObject({
       opened: true,
-      url: expectedOpenUrl(`http://localhost:${persisted.port}`, documentPath),
       serverUrl: `http://localhost:${persisted.port}`,
       path: documentPath,
+      projectPath: projectDir,
+      relativePath: "draft.md",
       originThreadId: null,
-      openMode: "disabled",
+      openMode: "desktop-app",
     });
+    expect(typeof payload.nativeSessionId).toBe("string");
   });
 
   it("prefers the live dev frontend URL when it matches this checkout", async () => {
@@ -500,7 +552,7 @@ describe("cli", () => {
       )}\n`,
     );
 
-    let lastOpenedUrl: string | null = null;
+    let openedDesktopPath: string | null = null;
     let spawnCount = 0;
 
     const deps = createCliDependencies({
@@ -550,9 +602,9 @@ describe("cli", () => {
         portByPid.delete(pid);
         runningPids.delete(pid);
       },
-      openUrl: (url) => {
-        lastOpenedUrl = url;
-        return "disabled";
+      openDesktopApp: (filePath) => {
+        openedDesktopPath = filePath;
+        return true;
       },
       log: () => {},
       error: () => {},
@@ -562,12 +614,17 @@ describe("cli", () => {
 
     expect(exitCode).toBe(0);
     expect(spawnCount).toBe(0);
-    expect(lastOpenedUrl).toBe(
-      expectedOpenUrl("http://localhost:5173", documentPath),
-    );
+    expect(openedDesktopPath).toBe(documentPath);
+    const sessions = JSON.parse(
+      fs.readFileSync(getNativeOpenSessionsFilePath(deps.env), "utf8"),
+    ) as Array<{ filePath: string; serverUrl: string }>;
+    expect(sessions.at(-1)).toMatchObject({
+      filePath: documentPath,
+      serverUrl: "http://localhost:3000",
+    });
   });
 
-  it("posts an explicit open --watch watcher to the dev API behind the live frontend", async () => {
+  it("rejects open --watch instead of launching a web review flow", async () => {
     const documentPath = path.join(projectDir, "draft.md");
     fs.writeFileSync(documentPath, "# Draft\n");
     fs.writeFileSync(
@@ -586,9 +643,8 @@ describe("cli", () => {
       )}\n`,
     );
 
-    let lastOpenedUrl: string | null = null;
-    let watchUrl: string | null = null;
     let spawnCount = 0;
+    const errors: string[] = [];
 
     const deps = createCliDependencies({
       env: {
@@ -622,21 +678,6 @@ describe("cli", () => {
           );
         }
 
-        if (url.pathname === "/api/review-events/watch") {
-          watchUrl = url.toString();
-          return new Response(
-            JSON.stringify({
-              events: [{ documentPath, type: "review.completed" }],
-              timedOut: false,
-              nextSequence: 2,
-            }),
-            {
-              status: 200,
-              headers: { "Content-Type": "application/json" },
-            },
-          );
-        }
-
         throw new Error(`Unexpected request: ${url.toString()}`);
       },
       spawnServerProcess: async () => {
@@ -645,12 +686,9 @@ describe("cli", () => {
       },
       isProcessRunning: () => false,
       stopProcess: async () => {},
-      openUrl: (url) => {
-        lastOpenedUrl = url;
-        return "disabled";
-      },
+      openDesktopApp: () => true,
       log: () => {},
-      error: () => {},
+      error: (message) => errors.push(message),
       resolveUpdateStatus: noUpdateStatus,
     });
 
@@ -659,12 +697,11 @@ describe("cli", () => {
       deps,
     );
 
-    expect(exitCode).toBe(0);
+    expect(exitCode).toBe(2);
     expect(spawnCount).toBe(0);
-    expect(lastOpenedUrl).toBe(
-      expectedOpenUrl("http://localhost:5173", documentPath),
+    expect(errors.join("\n")).toContain(
+      "blocking review wait flow is no longer part of `markdownmode open`",
     );
-    expect(watchUrl).toBe("http://localhost:3000/api/review-events/watch");
   });
 
   it("falls back to the api server URL when the dev frontend hint is stale", async () => {
@@ -697,9 +734,14 @@ describe("cli", () => {
 
     expect(exitCode).toBe(0);
     expect(test.getSpawnCount()).toBe(1);
-    expect(test.getLastOpenedUrl()).toBe(
-      expectedOpenUrl(`http://localhost:${persisted.port}`, documentPath),
-    );
+    expect(test.getLastOpenedDesktopPath()).toBe(documentPath);
+    const sessions = JSON.parse(
+      fs.readFileSync(getNativeOpenSessionsFilePath(test.deps.env), "utf8"),
+    ) as Array<{ filePath: string; serverUrl: string }>;
+    expect(sessions.at(-1)).toMatchObject({
+      filePath: documentPath,
+      serverUrl: `http://localhost:${persisted.port}`,
+    });
   });
 
   it("uses the preview-web frontend URL when that workflow is active", async () => {
@@ -721,7 +763,7 @@ describe("cli", () => {
       )}\n`,
     );
 
-    let lastOpenedUrl: string | null = null;
+    let openedDesktopPath: string | null = null;
     let spawnCount = 0;
 
     const deps = createCliDependencies({
@@ -756,9 +798,9 @@ describe("cli", () => {
       },
       isProcessRunning: () => false,
       stopProcess: async () => {},
-      openUrl: (url) => {
-        lastOpenedUrl = url;
-        return "disabled";
+      openDesktopApp: (filePath) => {
+        openedDesktopPath = filePath;
+        return true;
       },
       log: () => {},
       error: () => {},
@@ -768,9 +810,14 @@ describe("cli", () => {
 
     expect(exitCode).toBe(0);
     expect(spawnCount).toBe(0);
-    expect(lastOpenedUrl).toBe(
-      expectedOpenUrl("http://localhost:5174", documentPath),
-    );
+    expect(openedDesktopPath).toBe(documentPath);
+    const sessions = JSON.parse(
+      fs.readFileSync(getNativeOpenSessionsFilePath(deps.env), "utf8"),
+    ) as Array<{ filePath: string; serverUrl: string }>;
+    expect(sessions.at(-1)).toMatchObject({
+      filePath: documentPath,
+      serverUrl: "http://localhost:5174/",
+    });
   });
 
   it("rejects missing markdown files before opening", async () => {
@@ -782,7 +829,6 @@ describe("cli", () => {
     expect(exitCode).toBe(1);
     expect(test.getSpawnCount()).toBe(0);
     expect(test.errors).toContain(`Path not found: ${missingPath}`);
-    expect(test.getLastOpenedUrl()).toBeNull();
   });
 
   it("stops the running server and removes persisted state", async () => {
@@ -905,86 +951,21 @@ describe("cli", () => {
     });
   });
 
-  it("opens a document and waits for the next review event from open --watch --json", async () => {
+  it("rejects open --watch --json before starting legacy watch flow", async () => {
     const test = createTestDependencies();
     const documentPath = path.join(projectDir, "draft.md");
     fs.writeFileSync(documentPath, "# Draft\n");
-    let watchRequestBody: {
-      timeoutSeconds?: number;
-      batchWindowSeconds?: number;
-    } | null = null;
-    const deps = {
-      ...test.deps,
-      fetchImpl: async (input: Parameters<typeof fetch>[0], init) => {
-        const url =
-          input instanceof URL
-            ? input
-            : new URL(
-                typeof input === "string" ? input : input.url,
-                "http://localhost",
-              );
-        if (
-          url.pathname === "/api/review-events/watch" &&
-          typeof init?.body === "string"
-        ) {
-          watchRequestBody = JSON.parse(init.body) as {
-            timeoutSeconds?: number;
-            batchWindowSeconds?: number;
-          };
-        }
-        return test.deps.fetchImpl(input, init);
-      },
-    };
 
-    const watchPromise = runCli(
+    const exitCode = await runCli(
       ["open", documentPath, "--watch", "--json", "--batch-window", "0"],
-      deps,
+      test.deps,
     );
 
-    let persisted: { port: number } | null = null;
-    for (let attempt = 0; attempt < 20; attempt += 1) {
-      const stateFile = getServerStateFilePath(test.deps.env);
-      if (fs.existsSync(stateFile)) {
-        persisted = JSON.parse(fs.readFileSync(stateFile, "utf8")) as {
-          port: number;
-        };
-        break;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-
-    expect(persisted).not.toBeNull();
-    for (let attempt = 0; attempt < 20; attempt += 1) {
-      if (watchRequestBody) break;
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-    expect(watchRequestBody).toMatchObject({
-      batchWindowSeconds: 0,
-    });
-    expect(watchRequestBody).not.toHaveProperty("timeoutSeconds");
-    await fetch(`http://localhost:${persisted?.port}/api/review-events`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ projectPath: projectDir, path: "draft.md" }),
-    });
-
-    const exitCode = await watchPromise;
-    const payload = parseOnlyJsonLog<{
-      timedOut: boolean;
-      events: Array<{ documentPath: string; type: string }>;
-    }>(test.logs);
-
-    expect(exitCode).toBe(0);
-    expect(test.getLastOpenedUrl()).toContain(encodeURIComponent(documentPath));
-    expect(payload).toMatchObject({
-      timedOut: false,
-      events: [
-        {
-          documentPath,
-          type: "review.completed",
-        },
-      ],
-    });
+    expect(exitCode).toBe(2);
+    expect(test.getSpawnCount()).toBe(0);
+    expect(test.errors.join("\n")).toContain(
+      "blocking review wait flow is no longer part of `markdownmode open`",
+    );
   });
 
   it("cleans stale state during status checks", async () => {
@@ -1064,7 +1045,7 @@ describe("cli", () => {
       spawnServerProcess: async () => {
         throw new Error("should not spawn");
       },
-      openUrl: () => "disabled",
+      openDesktopApp: () => true,
       log: (message) => logs.push(message),
       error: () => {},
     });
@@ -1099,7 +1080,6 @@ describe("cli", () => {
     expect(test.errors).toContain(
       `Markdown Mode can only open .md files: ${projectDir}`,
     );
-    expect(test.getLastOpenedUrl()).toBeNull();
   });
 
   it("cleans stale state and warns when another Markdown Mode instance owns the port during stop", async () => {
@@ -1158,7 +1138,7 @@ describe("cli", () => {
       spawnServerProcess: async () => {
         throw new Error("should not spawn");
       },
-      openUrl: () => "disabled",
+      openDesktopApp: () => false,
       log: () => {},
       error: (message) => errors.push(message),
     });
@@ -1223,7 +1203,7 @@ describe("cli", () => {
       spawnServerProcess: async () => {
         throw new Error("should not spawn");
       },
-      openUrl: () => "disabled",
+      openDesktopApp: () => false,
       log: (message) => logs.push(message),
       error: () => {},
     });
@@ -1341,17 +1321,14 @@ describe("cli", () => {
 
     expect(exitCode).toBe(0);
     expect(test.logs).toContain(
-      "  markdownmode open <path> [--no-open] [--watch] [--print-url] [--port <port>]",
-    );
-    expect(test.logs).toContain(
-      "  --watch              Wait for the legacy Done Reviewing event",
+      "  markdownmode open <path> [--no-open] [--port <port>]",
     );
     expect(test.logs).toContain(
       "  --no-watch           Compatibility no-op; open returns by default",
     );
     expect(test.logs).toContain("  --origin-thread-id <id>");
     expect(test.logs).toContain(
-      "  --timeout <seconds>  Maximum watch time; omitted means no timeout",
+      "  --print-url          Removed; Markdown Mode no longer opens a web UI",
     );
   });
 
@@ -1601,7 +1578,7 @@ describe("cli", () => {
       },
       isProcessRunning: (pid) => pid === 424242,
       stopProcess: async () => {},
-      openUrl: () => "disabled",
+      openDesktopApp: () => false,
       log: () => {},
       error: () => {},
     });
@@ -1615,14 +1592,12 @@ describe("cli", () => {
   });
 });
 
-describe("runCli open in remote mode", () => {
+describe("runCli open with removed remote browser mode", () => {
   let tempDir: string;
   let projectDir: string;
 
   beforeEach(() => {
-    tempDir = fs.mkdtempSync(
-      path.join(os.tmpdir(), "markdownmode-cli-remote-"),
-    );
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "markdownmode-remote-"));
     projectDir = path.join(tempDir, "project");
     fs.mkdirSync(projectDir, { recursive: true });
   });
@@ -1631,76 +1606,18 @@ describe("runCli open in remote mode", () => {
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
-  async function startRemoteHost(remoteDocumentToken?: string): Promise<{
-    url: string;
-    close: () => Promise<void>;
-  }> {
-    const { app } = createApp({
-      homeDir: tempDir,
-      remoteDocumentToken,
-      staticDirPath: tempDir,
-    });
-    const server = createHttpServer(app);
-    await new Promise<void>((resolve) =>
-      server.listen(0, "127.0.0.1", () => resolve()),
-    );
-    const address = server.address();
-    if (!address || typeof address === "string") {
-      throw new Error("Failed to bind remote host");
-    }
-    return {
-      url: `http://127.0.0.1:${address.port}`,
-      close: () =>
-        new Promise<void>((resolve) => {
-          server.closeAllConnections?.();
-          server.close(() => resolve());
-        }),
-    };
-  }
-
-  it("prints register failure and exits 1 when the remote host is unreachable", async () => {
+  it("rejects ROUGHDRAFT_HOST remote browser opens", async () => {
     const filePath = path.join(projectDir, "draft.md");
     fs.writeFileSync(filePath, "# hello\n");
 
-    const logs: string[] = [];
     const errors: string[] = [];
-
-    const exitCode = await runCli(["open", filePath], {
-      env: { ROUGHDRAFT_HOST: "http://127.0.0.1:1" },
-      cwd: projectDir,
-      log: (m) => logs.push(m),
-      error: (m) => errors.push(m),
-      openUrl: () => "disabled",
-      resolveUpdateStatus: async () => ({
-        packageName: "markdownmode",
-        currentVersion: "0.1.0",
-        latestVersion: "0.1.0",
-        updateAvailable: false,
-        updateCommand: "",
-      }),
-    });
-
-    expect(exitCode).toBe(1);
-    expect(errors.join("\n")).toContain("Could not register remote session");
-  });
-
-  it("rejects non-.md targets in remote mode without contacting the host", async () => {
-    const filePath = path.join(projectDir, "notes.txt");
-    fs.writeFileSync(filePath, "hello");
-
-    const errors: string[] = [];
-    let fetchCalls = 0;
 
     const exitCode = await runCli(["open", filePath], {
       env: { ROUGHDRAFT_HOST: "http://127.0.0.1:1" },
       cwd: projectDir,
       log: () => {},
-      error: (m) => errors.push(m),
-      openUrl: () => "disabled",
-      fetchImpl: async () => {
-        fetchCalls += 1;
-        return new Response("", { status: 200 });
-      },
+      error: (message) => errors.push(message),
+      openDesktopApp: () => true,
       resolveUpdateStatus: async () => ({
         packageName: "markdownmode",
         currentVersion: "0.1.0",
@@ -1710,382 +1627,9 @@ describe("runCli open in remote mode", () => {
       }),
     });
 
-    expect(exitCode).toBe(1);
-    expect(fetchCalls).toBe(0);
-    expect(errors.join("\n")).toContain("can only open .md files");
-  });
-
-  it("registers a session, opens the viewer URL, and writes save events to disk", {
-    timeout: 15_000,
-  }, async () => {
-    const remote = await startRemoteHost();
-    try {
-      const filePath = path.join(projectDir, "draft.md");
-      fs.writeFileSync(filePath, "before\n");
-
-      const logs: string[] = [];
-      const errors: string[] = [];
-      let openedUrl: string | null = null;
-
-      const cliPromise = runCli(["open", filePath], {
-        env: { ROUGHDRAFT_HOST: remote.url },
-        cwd: projectDir,
-        log: (m) => logs.push(m),
-        error: (m) => errors.push(m),
-        openUrl: (url) => {
-          openedUrl = url;
-          return "disabled";
-        },
-        resolveUpdateStatus: async () => ({
-          packageName: "markdownmode",
-          currentVersion: "0.1.0",
-          latestVersion: "0.1.0",
-          updateAvailable: false,
-          updateCommand: "",
-        }),
-      });
-
-      // Wait for the CLI to register and open the SSE channel.
-      const deadline = Date.now() + 4000;
-      while (openedUrl === null && Date.now() < deadline) {
-        await new Promise((resolve) => setTimeout(resolve, 25));
-      }
-      expect(openedUrl).not.toBeNull();
-      const sessionId = new URL(
-        openedUrl as unknown as string,
-      ).searchParams.get("session");
-      expect(sessionId).toBeTruthy();
-
-      // Wait until the server actually has the SSE client connected before PUTting.
-      await new Promise((resolve) => setTimeout(resolve, 100));
-
-      // Trigger a save event by PUTting new content.
-      const putResponse = await fetch(
-        `${remote.url}/api/remote-document/${sessionId}`,
-        {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content: "after\n" }),
-        },
-      );
-      expect(putResponse.status).toBe(200);
-
-      // Wait until the file on disk reflects the save.
-      const writeDeadline = Date.now() + 4000;
-      while (
-        fs.readFileSync(filePath, "utf-8") !== "after\n" &&
-        Date.now() < writeDeadline
-      ) {
-        await new Promise((resolve) => setTimeout(resolve, 25));
-      }
-      expect(fs.readFileSync(filePath, "utf-8")).toBe("after\n");
-
-      // Closing the server ends the SSE stream and lets the CLI exit cleanly.
-      await remote.close();
-      const exitCode = await cliPromise;
-      expect(exitCode).toBe(0);
-      expect(
-        logs.some((m) => m.includes("Opened remote Markdown Mode session")),
-      ).toBe(true);
-    } finally {
-      await remote.close();
-    }
-  });
-
-  it("authenticates remote registration and the CLI save-back stream with ROUGHDRAFT_TOKEN", {
-    timeout: 15_000,
-  }, async () => {
-    const remote = await startRemoteHost("secret-token");
-    try {
-      const filePath = path.join(projectDir, "draft.md");
-      fs.writeFileSync(filePath, "before\n");
-
-      const logs: string[] = [];
-      const errors: string[] = [];
-      let openedUrl: string | null = null;
-
-      const cliPromise = runCli(["open", filePath], {
-        env: {
-          ROUGHDRAFT_HOST: remote.url,
-          ROUGHDRAFT_TOKEN: "secret-token",
-        },
-        cwd: projectDir,
-        log: (m) => logs.push(m),
-        error: (m) => errors.push(m),
-        openUrl: (url) => {
-          openedUrl = url;
-          return "disabled";
-        },
-        resolveUpdateStatus: async () => ({
-          packageName: "markdownmode",
-          currentVersion: "0.1.0",
-          latestVersion: "0.1.0",
-          updateAvailable: false,
-          updateCommand: "",
-        }),
-      });
-
-      const openDeadline = Date.now() + 4000;
-      while (openedUrl === null && Date.now() < openDeadline) {
-        await new Promise((resolve) => setTimeout(resolve, 25));
-      }
-      expect(openedUrl).not.toBeNull();
-
-      const parsedOpenedUrl = new URL(openedUrl as unknown as string);
-      const sessionId = parsedOpenedUrl.searchParams.get("session");
-      expect(sessionId).toBeTruthy();
-      expect(parsedOpenedUrl.searchParams.get("token")).toBe("secret-token");
-
-      await new Promise((resolve) => setTimeout(resolve, 100));
-
-      const putResponse = await fetch(
-        `${remote.url}/api/remote-document/${sessionId}`,
-        {
-          method: "PUT",
-          headers: {
-            Authorization: "Bearer secret-token",
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ content: "after-token\n" }),
-        },
-      );
-      expect(putResponse.status).toBe(200);
-
-      const writeDeadline = Date.now() + 4000;
-      while (
-        fs.readFileSync(filePath, "utf-8") !== "after-token\n" &&
-        Date.now() < writeDeadline
-      ) {
-        await new Promise((resolve) => setTimeout(resolve, 25));
-      }
-      expect(fs.readFileSync(filePath, "utf-8")).toBe("after-token\n");
-
-      await remote.close();
-      expect(await cliPromise).toBe(0);
-      expect(errors).toEqual([]);
-      expect(
-        logs.some((m) => m.includes("Opened remote Markdown Mode session")),
-      ).toBe(true);
-    } finally {
-      await remote.close();
-    }
-  });
-
-  it("writes remote saves to disk without altering markdown constructs", {
-    timeout: 15_000,
-  }, async () => {
-    const remote = await startRemoteHost();
-    try {
-      const filePath = path.join(projectDir, "roundtrip.md");
-      const originalContent = [
-        "---",
-        "title: Remote Roundtrip",
-        "---",
-        "",
-        "# Remote Roundtrip",
-        "",
-        "{>>Keep this comment<<}",
-        "{++new text++}",
-        "{--old text--}",
-        "{~~old~>new~~}",
-        "{==highlight==}",
-        "",
-        "| A | B |",
-        "| - | - |",
-        "| 1 | 2 |",
-        "",
-        "- [ ] task",
-        "",
-        "```md",
-        "{>>literal example<<}",
-        "```",
-        "",
-        "Inline `{>>literal<<}` and [local](./neighbor.md).",
-        "",
-        "<aside>supported html</aside>",
-        "",
-      ].join("\n");
-      const savedContent = originalContent.replace(
-        "# Remote Roundtrip",
-        "# Remote Roundtrip Edited",
-      );
-      fs.writeFileSync(filePath, originalContent);
-
-      const logs: string[] = [];
-      const errors: string[] = [];
-      let openedUrl: string | null = null;
-
-      const cliPromise = runCli(["open", filePath], {
-        env: { ROUGHDRAFT_HOST: remote.url },
-        cwd: projectDir,
-        log: (m) => logs.push(m),
-        error: (m) => errors.push(m),
-        openUrl: (url) => {
-          openedUrl = url;
-          return "disabled";
-        },
-        resolveUpdateStatus: async () => ({
-          packageName: "markdownmode",
-          currentVersion: "0.1.0",
-          latestVersion: "0.1.0",
-          updateAvailable: false,
-          updateCommand: "",
-        }),
-      });
-
-      const openDeadline = Date.now() + 4000;
-      while (openedUrl === null && Date.now() < openDeadline) {
-        await new Promise((resolve) => setTimeout(resolve, 25));
-      }
-      expect(openedUrl).not.toBeNull();
-
-      const sessionId = new URL(
-        openedUrl as unknown as string,
-      ).searchParams.get("session");
-      expect(sessionId).toBeTruthy();
-
-      await new Promise((resolve) => setTimeout(resolve, 100));
-
-      const loaded = await fetch(
-        `${remote.url}/api/remote-document/${sessionId}`,
-      );
-      expect(loaded.status).toBe(200);
-      const payload = (await loaded.json()) as { version: string };
-
-      const putResponse = await fetch(
-        `${remote.url}/api/remote-document/${sessionId}`,
-        {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            content: savedContent,
-            expectedVersion: payload.version,
-          }),
-        },
-      );
-      expect(putResponse.status).toBe(200);
-
-      const writeDeadline = Date.now() + 4000;
-      while (
-        fs.readFileSync(filePath, "utf-8") !== savedContent &&
-        Date.now() < writeDeadline
-      ) {
-        await new Promise((resolve) => setTimeout(resolve, 25));
-      }
-      expect(fs.readFileSync(filePath, "utf-8")).toBe(savedContent);
-
-      await remote.close();
-      expect(await cliPromise).toBe(0);
-      expect(errors).toEqual([]);
-      expect(
-        logs.some((m) => m.includes("Saved") && m.includes("roundtrip.md")),
-      ).toBe(true);
-    } finally {
-      await remote.close();
-    }
-  });
-
-  it("keeps the CLI save-back stream when a browser also watches the remote session", {
-    timeout: 15_000,
-  }, async () => {
-    const remote = await startRemoteHost();
-    let browserEventsReader: ReadableStreamDefaultReader<Uint8Array> | null =
-      null;
-
-    try {
-      const filePath = path.join(projectDir, "draft.md");
-      fs.writeFileSync(filePath, "before\n");
-
-      const logs: string[] = [];
-      const errors: string[] = [];
-      let openedUrl: string | null = null;
-      let cliSettled = false;
-
-      const cliPromise = runCli(["open", filePath], {
-        env: { ROUGHDRAFT_HOST: remote.url },
-        cwd: projectDir,
-        log: (m) => logs.push(m),
-        error: (m) => errors.push(m),
-        openUrl: (url) => {
-          openedUrl = url;
-          return "disabled";
-        },
-        resolveUpdateStatus: async () => ({
-          packageName: "markdownmode",
-          currentVersion: "0.1.0",
-          latestVersion: "0.1.0",
-          updateAvailable: false,
-          updateCommand: "",
-        }),
-      }).finally(() => {
-        cliSettled = true;
-      });
-
-      const openDeadline = Date.now() + 4000;
-      while (openedUrl === null && Date.now() < openDeadline) {
-        await new Promise((resolve) => setTimeout(resolve, 25));
-      }
-      expect(openedUrl).not.toBeNull();
-
-      const sessionId = new URL(
-        openedUrl as unknown as string,
-      ).searchParams.get("session");
-      expect(sessionId).toBeTruthy();
-
-      await new Promise((resolve) => setTimeout(resolve, 100));
-
-      const browserEvents = await fetch(
-        `${remote.url}/api/remote-document/${sessionId}/events?role=viewer`,
-      );
-      expect(browserEvents.status).toBe(200);
-      browserEventsReader = browserEvents.body?.getReader() ?? null;
-      expect(browserEventsReader).not.toBeNull();
-
-      const decoder = new TextDecoder();
-      let connectedChunk = "";
-      const browserConnectDeadline = Date.now() + 4000;
-      while (
-        !connectedChunk.includes("event: connected") &&
-        Date.now() < browserConnectDeadline
-      ) {
-        const chunk = await browserEventsReader?.read();
-        if (!chunk || chunk.done) break;
-        connectedChunk += decoder.decode(chunk.value);
-      }
-      expect(connectedChunk).toContain("event: connected");
-
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      expect(cliSettled).toBe(false);
-
-      const putResponse = await fetch(
-        `${remote.url}/api/remote-document/${sessionId}`,
-        {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content: "after-browser-watch\n" }),
-        },
-      );
-      expect(putResponse.status).toBe(200);
-
-      const writeDeadline = Date.now() + 4000;
-      while (
-        fs.readFileSync(filePath, "utf-8") !== "after-browser-watch\n" &&
-        Date.now() < writeDeadline
-      ) {
-        await new Promise((resolve) => setTimeout(resolve, 25));
-      }
-      expect(fs.readFileSync(filePath, "utf-8")).toBe("after-browser-watch\n");
-
-      await browserEventsReader?.cancel();
-      await remote.close();
-      expect(await cliPromise).toBe(0);
-      expect(errors).toEqual([]);
-      expect(
-        logs.some((m) => m.includes("Opened remote Markdown Mode session")),
-      ).toBe(true);
-    } finally {
-      await browserEventsReader?.cancel().catch(() => undefined);
-      await remote.close();
-    }
+    expect(exitCode).toBe(2);
+    expect(errors.join("\n")).toContain(
+      "Remote browser open mode has been removed",
+    );
   });
 });

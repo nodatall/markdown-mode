@@ -12,7 +12,7 @@ Roughdraft is a local Markdown review app with three runtime surfaces:
 - A local Express server and CLI in `packages/server`.
 - Shared Roughdraft-flavored Markdown parsing and mutation helpers in `packages/rfm`.
 
-The product unit is one resolved Markdown file. The server may hold transient process-local state for live sessions, open requests, review events, remote documents, and agent comment task state, but the Markdown file remains the durable document.
+The product unit is one resolved Markdown file. The server may hold transient process-local state for native open sessions, live sessions, open requests, review events, remote documents, and agent comment task state, but the Markdown file remains the durable document.
 
 ## Module Map
 
@@ -35,7 +35,7 @@ The product unit is one resolved Markdown file. The server may hold transient pr
 ### `packages/server`
 
 - Path: `packages/server/src`
-- Responsibility: Serve the built app, resolve and edit local Markdown files, host transient remote-document sessions, expose HTTP APIs, manage review-event compatibility, submit agent comment tasks through adapters, and provide the CLI entrypoint.
+- Responsibility: Serve the built app, resolve and edit local Markdown files, host transient document sessions, expose HTTP APIs, manage review-event compatibility, submit agent comment tasks through adapters, and provide the CLI entrypoint.
 - Public API or entrypoint: `createApp()` in `index.ts` and `runCli()` / bin wrapper in `cli.ts`.
 - May depend on: Node APIs, Express, `@roughdraft/rfm`, local adapter modules, and Codex CLI/app-server protocols at the integration edge.
 - Must not depend on: React component internals, Tauri runtime APIs, browser globals, or frontend state.
@@ -43,7 +43,7 @@ The product unit is one resolved Markdown file. The server may hold transient pr
 ### `src-tauri`
 
 - Path: `src-tauri`
-- Responsibility: Package the native macOS app shell and bridge local file open/save commands to the frontend.
+- Responsibility: Package the native macOS app shell, bridge local file open/save commands to the frontend, and consume short-lived CLI native-open metadata.
 - Public API or entrypoint: Tauri command handlers in `src-tauri/src`.
 - May depend on: Rust/Tauri APIs and local OS file dialogs/events.
 - Must not depend on: Express route internals or Markdown parser implementation details.
@@ -61,16 +61,17 @@ The product unit is one resolved Markdown file. The server may hold transient pr
 - Dependency direction should flow from runtime shells into stable contracts: CLI/server/app may call `packages/rfm`; `packages/rfm` must not call back into them.
 - The frontend talks to storage and agent behavior through `StorageBackend`, not by importing server modules.
 - The server owns route validation, filesystem boundaries, transient session/task state, and adapter wiring.
-- Agent integration belongs at the server edge behind an adapter interface. Core Markdown parsing and frontend editing must not know whether Codex, a fake adapter, or no adapter is active.
+- Native `markdownmode open` starts or reuses the local server, writes short-lived handoff metadata under `~/.markdownmode`, and opens `Markdown Mode.app`; the visible product path is not a browser URL.
+- Agent integration belongs at the server edge behind an adapter interface. Core Markdown parsing and frontend editing must not know whether Codex app-server, a fake adapter, or no adapter is active.
 - Thread/session metadata is transient launch or server state. Do not write it into Markdown or CriticMarkup attributes.
 
 ## Composition Roots And Runtime Entrypoints
 
-- `packages/server/src/index.ts` composes Express routes, local file resolution, remote document sessions, review-event compatibility, and agent comment task services.
-- `packages/server/src/cli.ts` composes CLI commands, server startup/reuse, local/remote open behavior, and launch metadata.
+- `packages/server/src/index.ts` composes Express routes, local file resolution, transient document sessions, review-event compatibility, and agent comment task services.
+- `packages/server/src/cli.ts` composes CLI commands, server startup/reuse, native app opening, and launch metadata.
 - `packages/app/src/detect-backend.ts` chooses the frontend backend at runtime.
 - `packages/app/src/App.tsx` composes the selected backend with document loading and workspace state.
-- `src-tauri/src/lib.rs` composes native file-open behavior with frontend events.
+- `src-tauri/src/lib.rs` composes native file-open behavior, transient session consumption, and frontend events.
 
 ## Shared Code Rules
 

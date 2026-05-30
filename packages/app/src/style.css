@@ -148,6 +148,11 @@
     background-color: #ffd000;
   }
 
+  .tiptap .comment-decoration.comment-decoration-working {
+    @apply text-inherit;
+    background-color: #c8e7ff;
+  }
+
   .dark .tiptap .comment-decoration {
     background-color: rgb(133 77 14 / 0.35);
   }
@@ -155,6 +160,10 @@
   .dark .tiptap .comment-decoration.comment-decoration-hovered,
   .dark .tiptap .comment-decoration.comment-decoration-active {
     background-color: rgb(180 83 9 / 0.55);
+  }
+
+  .dark .tiptap .comment-decoration.comment-decoration-working {
+    background-color: rgb(14 116 144 / 0.45);
   }
 
   .tiptap .comment-decoration.comment-decoration-on-critic-change {

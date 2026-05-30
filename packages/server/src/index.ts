@@ -9,6 +9,7 @@ import { extractRoughdraftReviewIndex } from "@roughdraft/rfm";
 import {
   type AgentCommentAdapter,
   AgentCommentTaskService,
+  CodexAppServerAgentCommentAdapter,
   FakeAgentCommentAdapter,
   reviewItemToAgentCommentInput,
 } from "./agent-comment-tasks.js";
@@ -407,7 +408,9 @@ export function createApp(options: CreateAppOptions = {}): CreateAppResult {
     options.agentCommentAdapter ??
     (process.env.ROUGHDRAFT_AGENT_ADAPTER === "fake"
       ? new FakeAgentCommentAdapter()
-      : undefined);
+      : process.env.ROUGHDRAFT_AGENT_ADAPTER === "codex-app"
+        ? new CodexAppServerAgentCommentAdapter()
+        : undefined);
   const agentCommentTasks = new AgentCommentTaskService({
     adapter: agentCommentAdapter,
   });

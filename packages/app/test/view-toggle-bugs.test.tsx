@@ -727,8 +727,14 @@ describe("agent comment workflow affordance", () => {
     expect(
       getByTestId(container, "agent-comment-inline-status").textContent,
     ).toContain("Agent working");
+    const workingMarker = getByTestId(
+      container,
+      "document-comment-marker-c1-working",
+    );
+    expect(workingMarker).not.toBeNull();
     expect(
-      getByTestId(container, "document-comment-marker-c1-working"),
-    ).not.toBeNull();
+      getByTestId(container, "document-comment-marker-c1").textContent,
+    ).toBe("");
+    expect(getByTestId(container, "comment-decoration-working")).not.toBeNull();
   });
 });
