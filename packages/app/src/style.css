@@ -792,6 +792,15 @@
   transform: translateX(var(--review-layout-shift-x));
 }
 
+/*
+ * The full-width document layout uses utility classes instead of the legacy
+ * review grid, but it still participates in the same FLIP transition.
+ */
+.document-page-shell {
+  --review-layout-shift-x: 0px;
+  transform: translateX(var(--review-layout-shift-x));
+}
+
 @media (min-width: 1100px) {
   .review-layout-grid {
     display: grid;
@@ -819,13 +828,15 @@
   }
 }
 
-.review-layout-grid.review-layout-grid--animating {
+.review-layout-grid.review-layout-grid--animating,
+.document-page-shell.review-layout-grid--animating {
   transition: transform 180ms cubic-bezier(0.4, 0, 0.2, 1);
   will-change: transform;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .review-layout-grid {
+  .review-layout-grid,
+  .document-page-shell {
     transition: none;
   }
 }

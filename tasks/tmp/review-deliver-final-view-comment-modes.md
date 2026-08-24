@@ -93,3 +93,72 @@
 
 - implementation_loop, workflow_patch_candidate: require browser geometry and color-token assertions before final review for chrome-placement work.
 - implementation_loop, workflow_patch_candidate: enumerate scheme, fragment, keyboard, modifier, paste/drop, and shortcut cases in the acceptance matrix before editing link or read-only behavior.
+
+## Review round 3 — post-rebase integration
+
+- review_round: 3
+- [x] Prompt A: Review current review scope
+- [x] Prompt B: Not applicable to the codex-short profile
+- [x] Prompt C: Not applicable to the codex-short profile
+- [x] Prompt D: Not applicable to the codex-short profile
+- [x] Prompt E: Not applicable to the codex-short profile
+- [x] Prompt F: Not applicable to the codex-short profile
+- [x] Prompt G: Frontend evidence review
+- [x] Prompt H: Production readiness validation
+- [x] Prompt I: Final completion audit
+
+### Prompt A
+
+- finding_count: 1
+- finding: Tiptap rejected the `tauri://` protocol before View mode could activate internal document links shown in the user's report.
+- disposition: fixed by registering `tauri` with the existing Markdown link extension and extending the direct-link behavior table.
+- integration evidence: the rebase also preserved upstream's newer review-handoff, file-copy, saved-state, and layout-animation behavior. The wider layout retains its 62rem/24rem geometry and uses a layout-neutral FLIP transform instead of restoring the old narrow grid.
+
+### Prompt G
+
+- finding_count: 0
+- disposition: pass; the rebase did not change the approved mockup geometry, palette, unboxed reader, or responsive rail behavior.
+
+### Prompt H
+
+- finding_count: 1 fixed
+- disposition: the app-specific link scheme is now admitted by the parser and still follows the existing explicit-click protected-open path.
+
+### Prompt I
+
+- finding_count: 0 new
+- disposition: one carried protocol finding required a focused fix and clean rereview.
+
+## Review round 4 — final clean rereview
+
+- review_round: 4
+- [x] Prompt A: Review current review scope
+- [x] Prompt B: Not applicable to the codex-short profile
+- [x] Prompt C: Not applicable to the codex-short profile
+- [x] Prompt D: Not applicable to the codex-short profile
+- [x] Prompt E: Not applicable to the codex-short profile
+- [x] Prompt F: Not applicable to the codex-short profile
+- [x] Prompt G: Frontend evidence review
+- [x] Prompt H: Production readiness validation
+- [x] Prompt I: Final completion audit
+
+### Prompt A
+
+- finding_count: 0
+- disposition: clean; the final reviewer confirmed the `tauri://` finding is resolved and reported no remaining concrete issue.
+
+### Prompt G
+
+- finding_count: 0
+- disposition: pass; prior visual grades and browser geometry evidence remain valid after the compatibility-only rebase fixes.
+
+### Prompt H
+
+- finding_count: 0
+- disposition: pass; HTTP, local Markdown, fragment, `mailto:`, `tel:`, and `tauri://` cases are covered by the resolved target contract.
+
+### Prompt I
+
+- finding_count: 0
+- disposition: ready for finalization.
+- final evidence: `pnpm check` passed with 29 RFM, 241 app, and 120 server tests plus all builds; `pnpm test:smoke` passed 13/13; the focused View/link tests passed 120/120; and the focused review-layout animation browser regression passed.

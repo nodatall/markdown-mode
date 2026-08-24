@@ -916,6 +916,7 @@ describe("PageCard editor integration", () => {
   it.each([
     ["email", "mailto:review@example.com"],
     ["telephone", "tel:+14155550123"],
+    ["app document", "tauri://localhost/?path=%2Ftmp%2Ftarget.md"],
   ])("opens %s links directly in View mode", async (_label, href) => {
     const backend = createBackend();
     const resolveFileUrl = vi.spyOn(backend, "resolveFileUrl");

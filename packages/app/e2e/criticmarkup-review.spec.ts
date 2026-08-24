@@ -116,6 +116,7 @@ test.describe("CriticMarkup review flows", () => {
     );
 
     await openMarkdownFile(page, filePath);
+    await enterCommentMode(page);
     await selectRichText(page, "target text");
     await page.getByTestId("selection-menu-action-comment").waitFor();
 

@@ -1938,7 +1938,7 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
       "min-[1504px]:grid-cols-[minmax(0,62rem)] min-[1504px]:justify-center",
   );
   const documentMainClass = cn(
-    "document-page-main w-full min-w-0",
+    "review-layout-main document-page-main w-full min-w-0",
     layout === "embedded-demo" ? "max-w-none" : "max-w-[62rem]",
   );
   const contentInsetClass = layout === "embedded-demo" ? "pb-0" : "pb-24";
@@ -2103,7 +2103,7 @@ const CodeEditorSurface = memo(function CodeEditorSurface({
       "min-[1504px]:grid-cols-[minmax(0,62rem)] min-[1504px]:justify-center",
   );
   const documentMainClass = cn(
-    "document-page-main w-full min-w-0",
+    "review-layout-main document-page-main w-full min-w-0",
     layout === "embedded-demo" ? "max-w-none" : "max-w-[62rem]",
   );
   const contentInsetClass = layout === "embedded-demo" ? "pb-0" : "pb-24";

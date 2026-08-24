@@ -807,6 +807,7 @@ export function createEditorExtensions(placeholder: string) {
       autolink: true,
       openOnClick: false,
       linkOnPaste: true,
+      protocols: ["tauri"],
     }),
     MarkdownCode,
     Table.configure({

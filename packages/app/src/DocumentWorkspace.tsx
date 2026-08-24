@@ -1044,7 +1044,7 @@ export function DocumentWorkspace({
                 "document-page-shell-no-comments min-[1504px]:grid-cols-[minmax(0,62rem)] min-[1504px]:justify-center",
             )}
           >
-            <div className="document-page-main w-full max-w-[62rem] min-w-0">
+            <div className="review-layout-main document-page-main w-full max-w-[62rem] min-w-0">
               <div className="flex w-full flex-wrap items-center gap-1.5 px-1">
                 <Tooltip>
                   <TooltipTrigger
