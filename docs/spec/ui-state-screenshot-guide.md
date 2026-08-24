@@ -113,10 +113,11 @@ suggestions:
 | Preview | Rich text default | `/preview?editor=rich-text` | `page-card-rich-text`, `rich-text-editor` | Uses in-memory preview backend and includes a sample anchored comment. |
 | Preview | Code editor default | `/preview?editor=code` | `page-card-code`, `markdown-code-editor` | Capture line wrapping, code editor chrome, and rail behavior. |
 | Document | Rich/code toggle | Use `document-editor-view-toggle` | `document-editor-view-toggle` | URL changes to `?editor=code` or `?editor=rich-text`. |
-| Document | Editing mode | Open mode menu and choose Editing | `document-mode-trigger` | Normal edit behavior. |
-| Document | Suggesting mode | Open mode menu and choose Suggesting | `document-mode-trigger` | Selection actions should create suggestions instead of direct edits. |
-| Document | Viewing mode | Open mode menu and choose Viewing | `document-mode-trigger` | Editing controls should look non-editable. |
-| Document | Save status: saved | Any clean document after autosave | `document-save-status` | Checkmark should sit fixed in the top-left corner and fade out over 2 seconds; accessible label remains `Saved`. |
+| Document | View mode, desktop | Open a plain or review fixture; View is the default | `document-mode-group`, `document-mode-view`, `document-page-header`, `document-content-card` | Eye is pressed in the neutral charcoal control at the viewport top-right. Capture at 1440px or wider: the native title shows one basename, the workspace has no duplicate filename, the approximately 54rem reader is unboxed, and no review-rail space is reserved. |
+| Document | Comment mode, desktop | Click `document-mode-comment` with the review fixture open | `document-mode-comment`, `document-review-rail` | Comment icon is pressed and review controls are available. Use a viewport at least 1504px wide to capture the approximately 62rem main column beside the 24rem review rail. |
+| Document | View/Comment responsive | Capture both modes below 1504px and at a mobile viewport | `document-page-shell`, `document-comment-fallback` | Main content stays single-column without horizontal overflow; Comment review items move into the in-flow fallback instead of squeezing the reader. |
+| Document | Save status: saved | Any clean document after autosave | `document-page-header` | Successful autosave is intentionally silent: there is no `document-save-status` node, Saved label, icon, or reserved spacer. |
+| Document | Update notice with mode controls | Mock `updateStatus` while a document is open | `update-notice`, `document-mode-group`, `document-mode-comment` | The mode group stays within 16px of the viewport top-right. The notice begins below the mode-control row with at least 8px clearance, so both icon buttons remain visible and clickable. |
 | Document | Save status: unsaved | Type in a local document before save completes | `document-save-status` | Spinner-only pending state; accessible label is `Unsaved changes`. Transient; often easier with save throttling or network mocking. |
 | Document | Save status: saving | Type and capture during autosave | `document-save-status` | Spinner-only pending state; accessible label is `Saving`. Transient; easiest with mocked delayed save. |
 | Document | Save status: failed | Force save error | `document-save-status` | Icon-only error state; accessible label is `Save failed`. Use backend/API mocking or a component harness. |
@@ -133,7 +134,8 @@ suggestions:
 | Remote | Disconnected banner | Drop remote session connection | `role=alert`, `aria-label="Remote session disconnected"` | Best captured with backend mocking. |
 | Editor | Selection menu | Select text in rich editor | `selection-menu` | Capture formatting buttons and comment/suggestion actions. |
 | Editor | Selection menu on suggestion | Select existing suggestion text | `selection-menu-action-accept-suggestion`, `selection-menu-action-reject-suggestion` | Requires review fixture. |
-| Editor | Link popover | Click a link or choose Link from selection menu | `link-popover`, `link-url-input`, `link-action-open`, `link-action-delete` | Use the plain fixture link. |
+| Editor | View direct link | In View, click the plain fixture link | rendered editor link | The link opens directly and does not open the comment/edit popover. Capture the pre-click View state; verify the resulting target separately. |
+| Editor | Comment link popover | In Comment, click a link or choose Link from the selection menu | `link-popover`, `link-url-input`, `link-action-open`, `link-action-delete` | Use the plain fixture link. The explicit Open Link action remains available without leaving review context immediately. |
 | Editor | Context menu | Right-click in rich editor | `editor-context-menu` | Capture comment, suggestion, paste, and paste-markdown actions. |
 | Review rail | Comments | Open review fixture in rich mode | `document-review-rail`, `comment-thread-root` | Thread containers use `data-comment-thread-container="true"`. |
 | Review rail | Suggestions | Open review fixture in rich mode | `suggestion-thread-s1`, `suggestion-thread-s2`, `suggestion-thread-s3` | Thread containers use `data-suggestion-thread-container="true"`. |
@@ -164,7 +166,7 @@ await mobile.screenshot({ path: `${outDir}/01-home-mobile.png`, fullPage: true }
 await browser.close();
 ```
 
-For interaction-heavy states, prefer selectors over coordinates. The current code has stable `data-testid` hooks for the homepage storyboard, editor view toggle, mode trigger, conflict banner/actions, review rail, rich editor, code editor, selection menu, link popover, and context menu.
+For interaction-heavy states, prefer selectors over coordinates. The current code has stable `data-testid` hooks for the homepage storyboard, editor view toggle, View and Comment mode buttons, conflict banner/actions, review rail, rich editor, code editor, selection menu, link popover, and context menu.
 ## States That Need A Harness Or Mocking
 These are real product states, but they are awkward to capture deterministically through only public routes:
 
@@ -190,6 +192,8 @@ The most reliable long-term solution is a dedicated screenshot harness route or 
 - Prefer `data-testid` selectors for screenshot automation; add a selector when a state matters visually.
   
 - Capture desktop and mobile for page-level states.
+
+- Capture the unboxed View reader at 1440px or wider, the side-by-side Comment rail at 1504px or wider, and a narrower responsive Comment state.
   
 - Capture both rich-text and code editor for document states that affect the editor surface or review rail.
   

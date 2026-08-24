@@ -820,7 +820,7 @@ describe("Homepage", () => {
       await Promise.resolve();
     });
 
-    expect(container.textContent).toContain("preview.md");
+    expect(container.textContent).not.toContain("preview.md");
     expect(container.textContent).toContain("Live Preview");
     expect(container.textContent).toContain("This draft only lives in memory.");
     expect(container.textContent).toContain("Select this sentence");

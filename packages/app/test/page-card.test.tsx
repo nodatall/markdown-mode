@@ -839,7 +839,11 @@ describe("PageCard editor integration", () => {
 
     await act(async () => {
       link?.dispatchEvent(
-        new MouseEvent("mousedown", { bubbles: true, cancelable: true }),
+        new MouseEvent("click", {
+          button: 0,
+          bubbles: true,
+          cancelable: true,
+        }),
       );
     });
     await flushAnimationFrame();
@@ -858,6 +862,359 @@ describe("PageCard editor integration", () => {
       "_blank",
       "noopener,noreferrer",
     );
+  });
+
+  it("opens local Markdown links directly in View mode without a link popover", async () => {
+    window.history.replaceState(
+      null,
+      "",
+      "/?path=%2FUsers%2Fme%2Fproject%2Fnotes%2Fsource.md",
+    );
+    const backend = createBackend();
+    backend.info = {
+      ...backend.info,
+      projectPath: "/Users/me/project",
+    };
+    const openWindow = vi.spyOn(window, "open").mockImplementation(() => null);
+    const rendered = await renderPageCard({
+      backend,
+      activeDocumentPath: "notes/source.md",
+      interactionMode: "viewing",
+      page: {
+        id: "notes/source-view",
+        title: "Source",
+        content: "[Target](target.md)",
+      },
+    });
+
+    const link = rendered.container.querySelector(
+      "a[data-markdown-src='target.md']",
+    );
+    expect(link).not.toBeNull();
+
+    await act(async () => {
+      link?.dispatchEvent(
+        new MouseEvent("click", {
+          button: 0,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+    await flushAnimationFrame();
+
+    expect
+      .soft(openWindow)
+      .toHaveBeenCalledWith(
+        "/?path=%2FUsers%2Fme%2Fproject%2Fnotes%2Ftarget.md",
+        "_blank",
+        "noopener,noreferrer",
+      );
+    expect.soft(queryByTestId(document, "link-action-open")).toBeNull();
+  });
+
+  it.each([
+    ["email", "mailto:review@example.com"],
+    ["telephone", "tel:+14155550123"],
+  ])("opens %s links directly in View mode", async (_label, href) => {
+    const backend = createBackend();
+    const resolveFileUrl = vi.spyOn(backend, "resolveFileUrl");
+    const openWindow = vi.spyOn(window, "open").mockImplementation(() => null);
+    const rendered = await renderPageCard({
+      backend,
+      interactionMode: "viewing",
+      page: {
+        id: `doc-view-${_label}-link-1`,
+        title: `View ${_label} link`,
+        content: `[Contact](${href})`,
+      },
+    });
+    const link = rendered.container.querySelector(
+      `a[data-markdown-src='${href}']`,
+    );
+    expect(link).not.toBeNull();
+
+    await act(async () => {
+      link?.dispatchEvent(
+        new MouseEvent("click", {
+          button: 0,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+
+    expect
+      .soft(openWindow)
+      .toHaveBeenCalledWith(href, "_blank", "noopener,noreferrer");
+    expect.soft(resolveFileUrl).not.toHaveBeenCalled();
+    expect.soft(queryByTestId(rendered.container, "link-popover")).toBeNull();
+  });
+
+  it("scrolls standard Markdown fragment links to their heading in View mode", async () => {
+    const openWindow = vi.spyOn(window, "open").mockImplementation(() => null);
+    const rendered = await renderPageCard({
+      interactionMode: "viewing",
+      page: {
+        id: "doc-view-fragment-link-1",
+        title: "View fragment link",
+        content: "[Jump](#section)\n\n## Section",
+      },
+    });
+    const link = rendered.container.querySelector(
+      "a[data-markdown-src='#section']",
+    );
+    expect(link).not.toBeNull();
+    const heading = rendered.container.ownerDocument.getElementById("section");
+    expect(heading).not.toBeNull();
+    expect(rendered.container.contains(heading)).toBe(true);
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(heading, "scrollIntoView", {
+      configurable: true,
+      value: scrollIntoView,
+    });
+
+    await act(async () => {
+      link?.dispatchEvent(
+        new MouseEvent("click", {
+          button: 0,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+
+    expect.soft(window.location.hash).toBe("#section");
+    expect.soft(scrollIntoView).toHaveBeenCalledOnce();
+    expect.soft(openWindow).not.toHaveBeenCalled();
+  });
+
+  it("keeps the link popover in Comment mode", async () => {
+    const openWindow = vi.spyOn(window, "open").mockImplementation(() => null);
+    const rendered = await renderPageCard({
+      interactionMode: "suggesting",
+      page: {
+        id: "doc-comment-link-popover-1",
+        title: "Comment link popover",
+        content: "[Target](https://example.com)",
+      },
+    });
+
+    const link = rendered.container.querySelector(
+      "a[data-markdown-src='https://example.com']",
+    );
+    expect(link).not.toBeNull();
+
+    await act(async () => {
+      link?.dispatchEvent(
+        new MouseEvent("click", {
+          button: 0,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+    await flushAnimationFrame();
+
+    expect(queryByTestId(document, "link-action-open")).not.toBeNull();
+    expect(openWindow).not.toHaveBeenCalled();
+  });
+
+  it("leaves modifier link clicks and the native context menu untouched in View mode", async () => {
+    const openWindow = vi.spyOn(window, "open").mockImplementation(() => null);
+    const rendered = await renderPageCard({
+      interactionMode: "viewing",
+      page: {
+        id: "doc-view-native-link-actions-1",
+        title: "View native link actions",
+        content: "[Target](https://example.com)",
+      },
+    });
+    const link = rendered.container.querySelector(
+      "a[data-markdown-src='https://example.com']",
+    );
+    expect(link).not.toBeNull();
+
+    const modifiedClick = new MouseEvent("click", {
+      button: 0,
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    const middleClick = new MouseEvent("click", {
+      button: 1,
+      bubbles: true,
+      cancelable: true,
+    });
+    const contextMenu = new MouseEvent("contextmenu", {
+      button: 2,
+      bubbles: true,
+      cancelable: true,
+    });
+
+    await act(async () => {
+      link?.dispatchEvent(modifiedClick);
+      link?.dispatchEvent(middleClick);
+      getEditable(rendered.container).dispatchEvent(contextMenu);
+    });
+
+    expect.soft(modifiedClick.defaultPrevented).toBe(false);
+    expect.soft(middleClick.defaultPrevented).toBe(false);
+    expect.soft(contextMenu.defaultPrevented).toBe(false);
+    expect.soft(openWindow).not.toHaveBeenCalled();
+    expect.soft(queryByTestId(rendered.container, "link-popover")).toBeNull();
+    expect
+      .soft(queryByTestId(rendered.container, "editor-context-menu"))
+      .toBeNull();
+  });
+
+  it("consumes pasted and dropped files in View mode without mutation or navigation", async () => {
+    const backend = createBackend();
+    const saveAsset = vi.spyOn(backend, "saveAsset");
+    const openWindow = vi.spyOn(window, "open").mockImplementation(() => null);
+    const rendered = await renderPageCard({
+      backend,
+      interactionMode: "viewing",
+      page: {
+        id: "doc-view-files-noop-1",
+        title: "View file input no-op",
+        content: "Original content",
+      },
+    });
+    const editable = getEditable(rendered.container);
+    const originalDocument = rendered.getEditor().getJSON();
+    const file = new File(["asset"], "asset.png", { type: "image/png" });
+    const pasteEvent = new Event("paste", {
+      bubbles: true,
+      cancelable: true,
+    });
+    Object.defineProperty(pasteEvent, "clipboardData", {
+      configurable: true,
+      value: { files: [file], getData: () => "" },
+    });
+    const dropEvent = new Event("drop", {
+      bubbles: true,
+      cancelable: true,
+    });
+    Object.defineProperty(dropEvent, "dataTransfer", {
+      configurable: true,
+      value: { files: [file] },
+    });
+
+    await act(async () => {
+      editable.dispatchEvent(pasteEvent);
+      editable.dispatchEvent(dropEvent);
+      await Promise.resolve();
+    });
+
+    expect.soft(pasteEvent.defaultPrevented).toBe(true);
+    expect.soft(dropEvent.defaultPrevented).toBe(true);
+    expect.soft(rendered.getEditor().getJSON()).toEqual(originalDocument);
+    expect.soft(rendered.onSave).not.toHaveBeenCalled();
+    expect.soft(saveAsset).not.toHaveBeenCalled();
+    expect.soft(openWindow).not.toHaveBeenCalled();
+  });
+
+  it("keeps comment and formatting shortcuts inert in View mode", async () => {
+    const rendered = await renderPageCard({
+      interactionMode: "viewing",
+      page: {
+        id: "doc-view-shortcuts-noop-1",
+        title: "View shortcut no-op",
+        content: "Original content",
+      },
+    });
+    const editor = rendered.getEditor();
+    const originalDocument = editor.getJSON();
+    await selectText(editor, "Original");
+    const editable = getEditable(rendered.container);
+    const isApplePlatform = /mac|iphone|ipad|ipod/i.test(navigator.platform);
+
+    await act(async () => {
+      editable.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "b",
+          code: "KeyB",
+          ctrlKey: !isApplePlatform,
+          metaKey: isApplePlatform,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+      await Promise.resolve();
+    });
+    await addCommentWithShortcut();
+
+    expect.soft(editor.getJSON()).toEqual(originalDocument);
+    expect.soft(rendered.onSave).not.toHaveBeenCalled();
+    expect.soft(queryByTestId(rendered.container, "selection-menu")).toBeNull();
+    expect
+      .soft(queryByTestId(rendered.container, "document-comment-fallback"))
+      .toBeNull();
+  });
+
+  it("hides existing review threads and the review rail in View mode", async () => {
+    const rendered = await renderPageCard({
+      interactionMode: "viewing",
+      page: {
+        id: "doc-view-existing-review-1",
+        title: "View existing review",
+        content:
+          'This {==word==}{>>Needs context.<<}{id="c1" by="user" at="2026-04-25T23:56:00.000Z"} has feedback.',
+      },
+    });
+
+    await flushAnimationFrame();
+
+    expect.soft(rendered.container.textContent).toContain("word");
+    expect
+      .soft(
+        rendered.container.querySelector(".comment-anchor[data-comment-ids]"),
+      )
+      .not.toBeNull();
+    expect
+      .soft(queryByTestId(rendered.container, "document-review-rail"))
+      .toBeNull();
+    expect
+      .soft(
+        rendered.container.querySelector(
+          '[data-comment-thread-container="true"]',
+        ),
+      )
+      .toBeNull();
+  });
+
+  it("switches review visibility without mutating CriticMarkup", async () => {
+    const content =
+      'This {==word==}{>>Needs context.<<}{id="c1" by="user" at="2026-04-25T23:56:00.000Z"} has feedback.';
+    const rendered = await renderPageCard({
+      interactionMode: "suggesting",
+      page: {
+        id: "doc-review-mode-round-trip-1",
+        title: "Review mode round trip",
+        content,
+      },
+    });
+
+    await flushAnimationFrame();
+    expect(
+      queryByTestId(rendered.container, "document-review-rail"),
+    ).not.toBeNull();
+
+    await rendered.rerender({ interactionMode: "viewing" });
+    await flushAnimationFrame();
+    expect(
+      queryByTestId(rendered.container, "document-review-rail"),
+    ).toBeNull();
+
+    await rendered.rerender({ interactionMode: "suggesting" });
+    await flushAnimationFrame();
+
+    expect
+      .soft(queryByTestId(rendered.container, "document-review-rail"))
+      .not.toBeNull();
+    expect.soft(rendered.container.textContent).toContain("word");
+    expect.soft(rendered.onSave).not.toHaveBeenCalled();
   });
 
   it("keeps focus in the editor when placing the cursor inside a link", async () => {
@@ -902,7 +1259,11 @@ describe("PageCard editor integration", () => {
 
     await act(async () => {
       link?.dispatchEvent(
-        new MouseEvent("mousedown", { bubbles: true, cancelable: true }),
+        new MouseEvent("click", {
+          button: 0,
+          bubbles: true,
+          cancelable: true,
+        }),
       );
     });
     await flushAnimationFrame();
@@ -1293,6 +1654,36 @@ describe("PageCard editor integration", () => {
     expect(
       queryByTestId(rendered.container, "document-review-rail"),
     ).not.toBeNull();
+  });
+
+  it("View mode keeps code read-only and removes review rail space", async () => {
+    const rendered = await renderPageCard({
+      page: {
+        id: "doc-view-code-1",
+        title: "View code",
+        content: "{==alpha==}{>>Comment body<<}\n\nParagraph",
+      },
+      editorViewMode: "code",
+      interactionMode: "viewing",
+      selected: true,
+    });
+
+    const codeContent = getByTestId(
+      rendered.container,
+      "markdown-code-editor",
+    ).querySelector(".cm-content");
+
+    expect.soft(codeContent?.getAttribute("contenteditable")).toBe("false");
+    expect
+      .soft(
+        rendered.container
+          .querySelector('[data-testid="document-page-shell"]')
+          ?.classList.contains("document-page-shell-no-comments"),
+      )
+      .toBe(true);
+    expect
+      .soft(queryByTestId(rendered.container, "document-review-rail"))
+      .toBeNull();
   });
 
   it("document code mode does not keep rail space for fenced CriticMarkup examples", async () => {

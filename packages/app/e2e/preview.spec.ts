@@ -1,5 +1,10 @@
 import { expect, test } from "@playwright/test";
-import { appendInCodeEditor, codeEditor, logE2eEvent } from "./helpers";
+import {
+  appendInCodeEditor,
+  codeEditor,
+  enterCommentMode,
+  logE2eEvent,
+} from "./helpers";
 
 test.describe("in-memory preview", () => {
   test("edits the preview document without persisting it @smoke", async ({
@@ -8,6 +13,7 @@ test.describe("in-memory preview", () => {
     await page.goto("/preview?editor=code");
 
     await expect(codeEditor(page)).toContainText("Live Preview");
+    await enterCommentMode(page);
     await appendInCodeEditor(page, "\n\nPreview-only edit.");
     await expect(codeEditor(page)).toContainText("Preview-only edit.");
 
@@ -34,10 +40,7 @@ test.describe("in-memory preview", () => {
     await page.goto("/preview");
 
     await expect(page.getByTestId("review-handoff-button")).toHaveCount(0);
-    await expect(page.getByTestId("document-save-status")).toHaveAttribute(
-      "aria-label",
-      "Saved",
-    );
+    await expect(page.getByTestId("document-save-status")).toHaveCount(0);
 
     logE2eEvent("preview.no-handoff-without-watcher", {
       route: "/preview",

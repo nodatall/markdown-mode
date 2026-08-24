@@ -24,7 +24,6 @@ import {
 import {
   buildLocationForDocumentEditorViewMode,
   type DocumentEditorViewMode,
-  formatWorkspacePathForDisplay,
   getDocumentEditorViewModeFromLocation,
   getPathLeaf,
   getRequestedPathState,
@@ -1649,22 +1648,17 @@ export function App() {
   ]);
 
   useEffect(() => {
-    const workspaceTitlePath = activeDocumentPath
-      ? formatWorkspacePathForDisplay(
-          backend?.info.projectPath
-            ? joinPath(backend.info.projectPath, activeDocumentPath)
-            : requestedPathState.rawPath,
-        )
-      : null;
+    const workspaceTitle = getPathLeaf(
+      activeDocumentPath ?? requestedPathState.rawPath,
+    );
 
     document.title = isPreviewRoute
       ? "Roughdraft Preview"
       : isRoughdraftFlavoredMarkdownRoute
         ? "Roughdraft Flavored Markdown"
-        : (workspaceTitlePath ?? "Roughdraft");
+        : (workspaceTitle ?? "Roughdraft");
   }, [
     activeDocumentPath,
-    backend,
     isRoughdraftFlavoredMarkdownRoute,
     isPreviewRoute,
     requestedPathState.rawPath,
@@ -1934,7 +1928,7 @@ export function App() {
   return (
     <main className="relative flex h-screen min-w-0 flex-col overflow-hidden bg-[#FCFCFC] dark:bg-background text-slate-950 dark:text-slate-50">
       {updateStatus ? (
-        <div className="pointer-events-none absolute top-4 right-4 z-40 max-w-sm">
+        <div className="pointer-events-none absolute top-[4.5rem] right-4 z-40 max-w-sm">
           <div className="pointer-events-auto">
             <UpdateNotice updateStatus={updateStatus} />
           </div>

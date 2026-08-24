@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import {
   createMarkdownProject,
+  enterCommentMode,
   logE2eEvent,
   openMarkdownFile,
   readProjectFile,
@@ -8,6 +9,8 @@ import {
   selectRichText,
   writeProjectFile,
 } from "./helpers";
+
+test.use({ viewport: { width: 1600, height: 900 } });
 
 test.describe("CriticMarkup review flows", () => {
   let projectDir: string;
@@ -35,6 +38,7 @@ test.describe("CriticMarkup review flows", () => {
     );
 
     await openMarkdownFile(page, filePath);
+    await enterCommentMode(page);
     await expect(page.getByTestId("document-review-rail")).toContainText(
       "Needs detail",
     );
@@ -78,6 +82,7 @@ test.describe("CriticMarkup review flows", () => {
     );
 
     await openMarkdownFile(page, filePath);
+    await enterCommentMode(page);
     await selectRichText(page, "target text");
     await page.getByTestId("selection-menu-action-comment").click();
     await page
@@ -151,6 +156,7 @@ test.describe("CriticMarkup review flows", () => {
     );
 
     await openMarkdownFile(page, filePath);
+    await enterCommentMode(page);
     await selectRichText(page, "target text");
 
     await page.getByTestId("selection-menu-action-bold").hover();
@@ -191,6 +197,7 @@ test.describe("CriticMarkup review flows", () => {
     );
 
     await openMarkdownFile(page, filePath);
+    await enterCommentMode(page);
     await expect(page.locator('[data-critic-change-id="s1"]')).toBeVisible();
 
     await page.getByTestId("comment-rail-s1-action-accept").click();

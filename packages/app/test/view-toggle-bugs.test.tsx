@@ -336,7 +336,6 @@ describe("saving/saved status indicator (issue 2 fix)", () => {
   }
 
   it.each([
-    ["saved", "Saved", "document-save-status-saved"],
     ["saving", "Saving", "animate-spin"],
     ["unsaved", "Unsaved changes", "animate-spin"],
     ["error", "Save failed", ""],
@@ -354,6 +353,12 @@ describe("saving/saved status indicator (issue 2 fix)", () => {
     }
   });
 
+  it("keeps a settled saved state silent", async () => {
+    await renderSaveStatus();
+
+    expect(queryByTestId(container, "document-save-status")).toBeNull();
+  });
+
   it.each([
     ["changed", "File changed on disk"],
     ["conflict", "Save conflict"],
@@ -367,7 +372,7 @@ describe("saving/saved status indicator (issue 2 fix)", () => {
     expect(getByTestId(status, "document-save-status-icon")).not.toBeNull();
   });
 
-  it("renders save status in the fixed corner when handoff exists", async () => {
+  it("keeps a settled save quiet when handoff exists", async () => {
     await renderWorkspace({ watcherCount: 1 });
 
     const stack = queryByTestId(container, "document-status-stack");
@@ -382,15 +387,13 @@ describe("saving/saved status indicator (issue 2 fix)", () => {
     expect(doneReviewingButton?.textContent).toContain("Approve");
     expect(doneReviewingButton?.textContent).not.toContain("Saved");
     expect(stack?.textContent).not.toContain("Saved");
-    expect(header.textContent).toContain("test.md");
+    expect(header.textContent).not.toContain("test.md");
     expect(header.textContent).not.toContain("Saved");
     expect(queryByTestId(header, "document-save-status")).toBeNull();
-    expect(
-      getByTestId(corner, "document-save-status").getAttribute("aria-label"),
-    ).toBe("Saved");
+    expect(queryByTestId(corner, "document-save-status")).toBeNull();
   });
 
-  it("renders save status in the fixed corner without handoff", async () => {
+  it("keeps a settled save quiet without handoff", async () => {
     await renderWorkspace();
 
     const stack = queryByTestId(container, "document-status-stack");
@@ -399,12 +402,47 @@ describe("saving/saved status indicator (issue 2 fix)", () => {
     expect(stack).not.toBeNull();
     expect(stack?.textContent).not.toContain("I'm done");
     expect(stack?.textContent).not.toContain("Saved");
-    expect(header.textContent).toContain("test.md");
+    expect(header.textContent).not.toContain("test.md");
     expect(header.textContent).not.toContain("Saved");
     expect(queryByTestId(header, "document-save-status")).toBeNull();
-    expect(
-      getByTestId(corner, "document-save-status").getAttribute("aria-label"),
-    ).toBe("Saved");
+    expect(queryByTestId(corner, "document-save-status")).toBeNull();
+  });
+
+  it("defaults to icon-only View mode and toggles to Comment mode", async () => {
+    await renderWorkspace();
+
+    const viewButton = queryByTestId<HTMLButtonElement>(
+      container,
+      "document-mode-view",
+    );
+    const commentButton = queryByTestId<HTMLButtonElement>(
+      container,
+      "document-mode-comment",
+    );
+
+    expect.soft(viewButton).not.toBeNull();
+    expect.soft(commentButton).not.toBeNull();
+    expect.soft(queryByTestId(container, "document-mode-trigger")).toBeNull();
+
+    if (!viewButton || !commentButton) return;
+
+    expect(viewButton.textContent).toBe("");
+    expect(commentButton.textContent).toBe("");
+    expect(viewButton.getAttribute("aria-pressed")).toBe("true");
+    expect(commentButton.getAttribute("aria-pressed")).toBe("false");
+
+    await click(commentButton);
+
+    expect(viewButton.getAttribute("aria-pressed")).toBe("false");
+    expect(commentButton.getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("keeps settled saves and the duplicate filename out of workspace chrome", async () => {
+    await renderWorkspace();
+
+    const header = getByTestId(container, "document-page-header");
+    expect.soft(queryByTestId(header, "document-save-status")).toBeNull();
+    expect.soft(header.textContent).not.toContain("test.md");
   });
 
   it.each([
@@ -509,7 +547,7 @@ describe("saving/saved status indicator (issue 2 fix)", () => {
       "text/plain": expect.any(Blob),
     });
     await expect(clipboardItems[0]["text/html"].text()).resolves.toContain(
-      "<h1>Heading</h1>",
+      '<h1 id="heading">Heading</h1>',
     );
     await expect(clipboardItems[0]["text/plain"].text()).resolves.toBe(
       "Heading\nBody",
@@ -691,7 +729,7 @@ describe("saving/saved status indicator (issue 2 fix)", () => {
   });
 });
 
-describe("interaction mode preserved across view toggle (issue 3 fix)", () => {
+describe("workspace mode controls", () => {
   let container: HTMLDivElement;
   let root: Root;
 
@@ -710,15 +748,62 @@ describe("interaction mode preserved across view toggle (issue 3 fix)", () => {
     vi.restoreAllMocks();
   });
 
-  it("interaction mode is preserved when view mode changes without remount", async () => {
-    // With the fix, view mode changes use React state (no page reload),
-    // so the DocumentWorkspace component stays mounted and interaction
-    // mode is preserved.
-
+  it("preserves Comment across editor views and resets to View for another document", async () => {
     (
       globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
     ).IS_REACT_ACT_ENVIRONMENT = true;
 
+    const renderWorkspace = async (
+      viewMode: DocumentEditorViewMode,
+      activeDocumentPath = "test.md",
+    ) => {
+      await act(async () => {
+        root.render(
+          <DocumentWorkspace
+            documentPage={createPage()}
+            activeDocumentPath={activeDocumentPath}
+            documentFilenameLabel={activeDocumentPath}
+            documentEditorViewMode={viewMode}
+            onDocumentEditorViewModeChange={() => {}}
+            onSaveDocument={async () => {}}
+            onDocumentSaveStateChange={() => {}}
+            onDocumentDirtyStateChange={() => {}}
+            onDocumentLocalContentChange={() => {}}
+            documentDiskChangeState="clean"
+            documentForceResetKey={null}
+            onReloadDocumentFromDisk={() => {}}
+            onKeepEditingWithoutAutosave={() => {}}
+            onOverwriteDocumentOnDisk={() => {}}
+            onCompleteReview={async () => ({ delivered: false })}
+            backend={createBackend()}
+          />,
+        );
+      });
+    };
+
+    await renderWorkspace("rich-text");
+    const viewButton = getByTestId<HTMLButtonElement>(
+      container,
+      "document-mode-view",
+    );
+    const commentButton = getByTestId<HTMLButtonElement>(
+      container,
+      "document-mode-comment",
+    );
+    expect(viewButton.getAttribute("aria-pressed")).toBe("true");
+
+    await click(commentButton);
+    expect(commentButton.getAttribute("aria-pressed")).toBe("true");
+
+    await renderWorkspace("code");
+    expect(commentButton.getAttribute("aria-pressed")).toBe("true");
+
+    await renderWorkspace("code", "other.md");
+    expect(viewButton.getAttribute("aria-pressed")).toBe("true");
+    expect(commentButton.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("uses source-specific icons for the rich and code view action", async () => {
     const renderWorkspace = async (viewMode: DocumentEditorViewMode) => {
       await act(async () => {
         root.render(
@@ -744,18 +829,16 @@ describe("interaction mode preserved across view toggle (issue 3 fix)", () => {
       });
     };
 
-    // Mount with rich-text -> mode is "Suggesting" by default
     await renderWorkspace("rich-text");
+    const toggle = getByTestId(container, "document-editor-view-toggle");
     expect(
-      getByTestId(container, "document-mode-trigger").textContent,
-    ).toContain("Suggesting");
+      queryByTestId(toggle, "document-editor-view-toggle-icon-code"),
+    ).not.toBeNull();
 
-    // Rerender with code view (same component instance, no remount) ->
-    // mode stays "Suggesting" because the component is not destroyed.
     await renderWorkspace("code");
     expect(
-      getByTestId(container, "document-mode-trigger").textContent,
-    ).toContain("Suggesting");
+      queryByTestId(toggle, "document-editor-view-toggle-icon-rich-text"),
+    ).not.toBeNull();
   });
 });
 

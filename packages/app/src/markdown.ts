@@ -21,7 +21,7 @@ export interface YamlDocumentMetadataSplit {
   endmatter: string | null;
 }
 
-function isExternalUrl(path: string): boolean {
+export function isExternalUrl(path: string): boolean {
   return /^[a-z][a-z0-9+.-]*:/i.test(path) || path.startsWith("//");
 }
 
@@ -35,6 +35,17 @@ function escapeHtml(value: string): string {
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
+}
+
+function slugifyHeading(value: string): string {
+  return value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s-]/gu, "")
+    .trim()
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-");
 }
 
 export function encodeRawMarkdownBlock(markdown: string): string {
@@ -312,6 +323,20 @@ export function createMarkedRenderer(options?: MarkdownOptions) {
   const baseRenderer = new marked.Renderer();
   const resolveFileUrl = options?.resolveFileUrl;
   const resolveLinkUrl = options?.resolveLinkUrl;
+  const headingSlugCounts = new Map<string, number>();
+
+  renderer.heading = function ({ tokens, depth, text }) {
+    const content = this.parser.parseInline(tokens);
+    const baseSlug = slugifyHeading(text);
+    if (!baseSlug) return `<h${depth}>${content}</h${depth}>\n`;
+
+    const duplicateIndex = headingSlugCounts.get(baseSlug) ?? 0;
+    headingSlugCounts.set(baseSlug, duplicateIndex + 1);
+    const slug =
+      duplicateIndex === 0 ? baseSlug : `${baseSlug}-${duplicateIndex}`;
+
+    return `<h${depth} id="${escapeHtml(slug)}">${content}</h${depth}>\n`;
+  };
 
   renderer.code = ({ text, lang, escaped }) => {
     const language = (lang || "").match(/\S+/)?.[0];

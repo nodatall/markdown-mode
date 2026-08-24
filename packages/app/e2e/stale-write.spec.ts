@@ -5,6 +5,7 @@ import {
   codeEditor,
   createMarkdownProject,
   documentSaveStatus,
+  enterCommentMode,
   fileConflictNotice,
   logE2eEvent,
   openMarkdownFile,
@@ -36,6 +37,7 @@ test.describe("stale writes", () => {
     );
 
     await openMarkdownFile(page, filePath, "code");
+    await enterCommentMode(page);
     await expect(codeEditor(page)).toContainText("Original body.");
 
     fs.writeFileSync(filePath, "# Conflict\n\nExternal body.\n");
@@ -82,6 +84,7 @@ test.describe("stale writes", () => {
     );
 
     await openMarkdownFile(page, filePath, "code");
+    await enterCommentMode(page);
     await expect(codeEditor(page)).toContainText("Original body.");
 
     fs.writeFileSync(filePath, "# Conflict\n\nExternal body.\n");
@@ -96,18 +99,7 @@ test.describe("stale writes", () => {
     await expect
       .poll(() => readProjectFile(projectDir, "overwrite-conflict.md"))
       .toContain("Local overwrite body.");
-    await expect(documentSaveStatus(page)).toHaveAttribute(
-      "aria-label",
-      "Saved",
-    );
-    await expect(documentSaveStatus(page)).not.toHaveAttribute(
-      "aria-label",
-      "Save failed",
-    );
-    await expect(documentSaveStatus(page)).not.toHaveAttribute(
-      "aria-label",
-      "Unsaved changes",
-    );
+    await expect(documentSaveStatus(page)).toHaveCount(0);
 
     logE2eEvent("stale-write.overwrite-saved", {
       file: "overwrite-conflict.md",
@@ -127,6 +119,7 @@ test.describe("stale writes", () => {
     );
 
     await openMarkdownFile(page, filePath, "code");
+    await enterCommentMode(page);
     await expect(codeEditor(page)).toContainText("Original body.");
 
     fs.writeFileSync(filePath, "# Manual Conflict\n\nExternal body.\n");
@@ -163,6 +156,7 @@ test.describe("stale writes", () => {
     fs.utimesSync(filePath, fixedTimestamp, fixedTimestamp);
 
     await openMarkdownFile(page, filePath, "code");
+    await enterCommentMode(page);
     await expect(codeEditor(page)).toContainText("Original");
 
     fs.writeFileSync(filePath, "# External\n");
@@ -198,6 +192,7 @@ test.describe("stale writes", () => {
     );
 
     await openMarkdownFile(page, filePath, "code");
+    await enterCommentMode(page);
     await expect(codeEditor(page)).toContainText("Paragraph 1");
 
     await codeEditor(page).click();
@@ -246,6 +241,7 @@ test.describe("stale writes", () => {
       fs.writeFileSync(filePath, "# Layout conflict\n\nOriginal body.\n");
       await page.setViewportSize(viewport);
       await openMarkdownFile(page, filePath, "code");
+      await enterCommentMode(page);
       await expect(codeEditor(page)).toContainText("Original body.");
 
       fs.writeFileSync(filePath, "# Layout conflict\n\nExternal body.\n");

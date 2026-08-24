@@ -1,0 +1,511 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Markdown Mode — View and Comment mockup</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --background: #101211;
+        --background-raised: #171918;
+        --foreground: #e7e9e7;
+        --muted: #9ca19d;
+        --faint: #606561;
+        --line: #2b2e2c;
+        --hover: #202321;
+        --active: #2a2d2b;
+        --link: #22a7d6;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        min-height: 100%;
+      }
+
+      body {
+        margin: 0;
+        background: var(--background);
+        color: var(--foreground);
+        font-family:
+          Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          sans-serif;
+        font-size: 15px;
+        line-height: 1.55;
+      }
+
+      button,
+      a {
+        -webkit-tap-highlight-color: transparent;
+      }
+
+      .titlebar {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        height: 44px;
+        background: color-mix(in srgb, var(--background) 94%, transparent);
+        border-bottom: 1px solid #181a19;
+        backdrop-filter: blur(16px);
+      }
+
+      .traffic-lights {
+        position: absolute;
+        top: 18px;
+        left: 14px;
+        display: flex;
+        gap: 7px;
+      }
+
+      .traffic-lights span {
+        width: 7px;
+        height: 7px;
+        border-radius: 999px;
+        background: #363a37;
+      }
+
+      .window-title {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        color: #727773;
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.01em;
+        pointer-events: none;
+      }
+
+      .mode-group {
+        position: absolute;
+        top: 8px;
+        right: 12px;
+        display: flex;
+        padding: 2px;
+        gap: 2px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #151715;
+      }
+
+      .mode-button {
+        position: relative;
+        display: grid;
+        width: 28px;
+        height: 24px;
+        padding: 0;
+        place-items: center;
+        border: 0;
+        border-radius: 5px;
+        background: transparent;
+        color: #777c78;
+        cursor: pointer;
+      }
+
+      .mode-button:hover {
+        background: var(--hover);
+        color: #bfc3c0;
+      }
+
+      .mode-button[aria-pressed="true"] {
+        background: var(--active);
+        color: var(--foreground);
+      }
+
+      .mode-button:focus-visible {
+        outline: 2px solid #8e938f;
+        outline-offset: 2px;
+      }
+
+      .mode-button svg {
+        width: 15px;
+        height: 15px;
+        stroke: currentColor;
+        stroke-width: 1.8;
+        fill: none;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+
+      .tooltip {
+        position: absolute;
+        top: 31px;
+        left: 50%;
+        padding: 4px 7px;
+        transform: translateX(-50%) translateY(-2px);
+        border: 1px solid var(--line);
+        border-radius: 5px;
+        background: #252825;
+        color: #e1e3e1;
+        font-size: 11px;
+        line-height: 1.2;
+        opacity: 0;
+        pointer-events: none;
+        transition: 120ms ease;
+        white-space: nowrap;
+      }
+
+      .mode-button:hover .tooltip,
+      .mode-button:focus-visible .tooltip {
+        transform: translateX(-50%) translateY(0);
+        opacity: 1;
+      }
+
+      .workspace {
+        min-height: calc(100vh - 44px);
+        padding: 46px 38px 100px;
+      }
+
+      .reader-shell {
+        display: grid;
+        grid-template-columns: minmax(0, 62rem);
+        justify-content: center;
+        column-gap: 32px;
+        row-gap: 14px;
+        max-width: 88rem;
+        margin: 0 auto;
+        transition: grid-template-columns 180ms ease;
+      }
+
+      .workspace[data-mode="comment"] .reader-shell {
+        grid-template-columns: minmax(0, 62rem) minmax(18rem, 22rem);
+      }
+
+      .document {
+        grid-column: 1;
+        grid-row: 2;
+        min-width: 0;
+        padding: 0 4rem;
+        border: 0;
+        background: transparent;
+        box-shadow: none;
+      }
+
+      .reader-utilities {
+        grid-column: 1;
+        grid-row: 1;
+        display: flex;
+        gap: 3px;
+        padding: 0 4rem;
+      }
+
+      .utility-button {
+        display: grid;
+        width: 25px;
+        height: 23px;
+        padding: 0;
+        place-items: center;
+        border: 0;
+        border-radius: 5px;
+        background: transparent;
+        color: #555a56;
+        cursor: pointer;
+      }
+
+      .utility-button:hover,
+      .utility-button:focus-visible {
+        background: var(--hover);
+        color: #a8aca9;
+      }
+
+      .utility-button:focus-visible {
+        outline: 2px solid #8e938f;
+        outline-offset: 2px;
+      }
+
+      .utility-button svg {
+        width: 14px;
+        height: 14px;
+        stroke: currentColor;
+        stroke-width: 1.7;
+        fill: none;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+
+      .document h1,
+      .document h2,
+      .document h3,
+      .document p,
+      .document ol,
+      .document ul {
+        max-width: none;
+      }
+
+      .document h1 {
+        margin: 0 0 30px;
+        font-size: 27px;
+        line-height: 1.2;
+        letter-spacing: -0.025em;
+      }
+
+      .document h2 {
+        margin: 36px 0 12px;
+        font-size: 18px;
+        line-height: 1.3;
+        letter-spacing: -0.012em;
+      }
+
+      .document h3 {
+        margin: 24px 0 8px;
+        font-size: 15px;
+        line-height: 1.4;
+      }
+
+      .document p {
+        margin: 0 0 12px;
+        color: #c8cbc9;
+      }
+
+      .document ol,
+      .document ul {
+        margin: 0 0 18px;
+        padding-left: 24px;
+        color: #c8cbc9;
+      }
+
+      .document li {
+        padding-left: 4px;
+        margin: 5px 0;
+      }
+
+      .document li::marker {
+        color: #858a86;
+      }
+
+      .document strong {
+        color: #e5e7e5;
+      }
+
+      .document a {
+        color: var(--link);
+        text-decoration-thickness: 1px;
+        text-underline-offset: 3px;
+      }
+
+      .document code {
+        padding: 1px 5px;
+        border-radius: 4px;
+        background: #202321;
+        color: #d7dad7;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.9em;
+      }
+
+      .commentable {
+        border-radius: 3px;
+        transition:
+          background 150ms ease,
+          box-shadow 150ms ease;
+      }
+
+      .workspace[data-mode="comment"] .commentable {
+        background: rgb(255 255 255 / 4.5%);
+        box-shadow: 0 0 0 2px rgb(255 255 255 / 4.5%);
+        cursor: text;
+      }
+
+      .review-rail {
+        grid-column: 2;
+        grid-row: 2;
+        display: none;
+        align-self: start;
+        position: sticky;
+        top: 68px;
+      }
+
+      .workspace[data-mode="comment"] .review-rail {
+        display: block;
+      }
+
+      .comment-card {
+        padding: 14px;
+        border: 1px solid var(--line);
+        border-radius: 9px;
+        background: var(--background-raised);
+      }
+
+      .comment-meta {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 8px;
+        color: #b9bdb9;
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      .comment-meta span:last-child {
+        color: var(--faint);
+        font-weight: 500;
+      }
+
+      .comment-card p {
+        margin: 0;
+        color: #c7cac7;
+        font-size: 13px;
+        line-height: 1.45;
+      }
+
+      .mode-note {
+        margin-top: 10px;
+        color: #666b67;
+        font-size: 11px;
+        text-align: right;
+      }
+
+      @media (max-width: 1180px) {
+        .workspace[data-mode="comment"] .reader-shell {
+          grid-template-columns: minmax(0, 62rem);
+        }
+
+        .workspace[data-mode="comment"] .review-rail {
+          grid-column: 1;
+          grid-row: 3;
+          position: static;
+          max-width: 38rem;
+          margin: 0 4rem;
+        }
+      }
+
+      @media (max-width: 720px) {
+        .workspace {
+          padding: 34px 22px 72px;
+        }
+
+        .document h1 {
+          font-size: 23px;
+        }
+
+        .document,
+        .reader-utilities {
+          padding-right: 0;
+          padding-left: 0;
+        }
+
+        .workspace[data-mode="comment"] .review-rail {
+          margin-right: 0;
+          margin-left: 0;
+        }
+
+        .window-title {
+          justify-content: start;
+          padding-left: 68px;
+          padding-right: 92px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="titlebar">
+      <div class="traffic-lights" aria-hidden="true">
+        <span></span><span></span><span></span>
+      </div>
+      <div class="window-title">2026-08-21.md</div>
+      <div class="mode-group" role="group" aria-label="Document interaction mode">
+        <button class="mode-button" id="view-mode" type="button" aria-label="View mode" aria-pressed="true">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z" />
+            <circle cx="12" cy="12" r="2.6" />
+          </svg>
+          <span class="tooltip" role="tooltip">View</span>
+        </button>
+        <button class="mode-button" id="comment-mode" type="button" aria-label="Comment mode" aria-pressed="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M20 15a3 3 0 0 1-3 3H9l-5 3v-6a3 3 0 0 1-1-2.2V7a3 3 0 0 1 3-3h11a3 3 0 0 1 3 3v8Z" />
+          </svg>
+          <span class="tooltip" role="tooltip">Comment</span>
+        </button>
+      </div>
+    </header>
+
+    <main class="workspace" id="workspace" data-mode="view">
+      <div class="reader-shell">
+        <div class="reader-utilities" aria-label="Document utilities">
+          <button class="utility-button" type="button" aria-label="Open source view" title="Open source view">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="m8 9-3 3 3 3M16 9l3 3-3 3M14 5l-4 14" />
+            </svg>
+          </button>
+          <button class="utility-button" type="button" aria-label="Document file actions" title="Document file actions">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="5" cy="12" r="1" fill="currentColor" stroke="none" />
+              <circle cx="12" cy="12" r="1" fill="currentColor" stroke="none" />
+              <circle cx="19" cy="12" r="1" fill="currentColor" stroke="none" />
+            </svg>
+          </button>
+        </div>
+        <article class="document">
+          <h1>Morning report for 2026-08-21</h1>
+
+          <h2>Today's highest-leverage actions</h2>
+          <ol>
+            <li>
+              Complete the verified recruiter block: first touches to Hayley Killengrey and Benjamin Reavill, plus the one due follow-up to Bryan Fail, Christopher Velasco, Dominic Taylor, Ben Watts, Joe Dukes, and Matthew Turpin.
+            </li>
+            <li class="commentable">
+              Close the Harvey referral state with Alizah. Confirm whether it was submitted and which resume was used; once that state is clear, send the separate DoorDash UX Design Engineer listing.
+            </li>
+            <li>
+              Acknowledge Michael Brewer's Clara decision and accept his offer of detailed technical feedback. Preserve his explicit interest in a future junior full-stack opening.
+            </li>
+            <li>
+              Reopen the existing Guillaume Poncin email relationship for Alchemy's current Customer Product Engineer role before applying.
+            </li>
+          </ol>
+
+          <h2>Action-ready recruiter opportunities</h2>
+          <h3>1. Hayley Killengrey — DeepRec, US software and applied-AI recruiting</h3>
+          <ul>
+            <li><strong>Why selected:</strong> Hayley has 13-plus years recruiting software engineers across Europe and North America.</li>
+            <li><strong>Channel:</strong> Published company email <code>hayley@deeprec.ai</code>; <a href="https://deeprec.ai">official DeepRec profile</a>.</li>
+            <li><strong>Multiple-opportunity value:</strong> Her multi-client work can route candidates across product-facing applied-AI and full-stack searches.</li>
+            <li><strong>Status / next step:</strong> <code>ready_to_contact</code>, unsent.</li>
+          </ul>
+
+          <h3>2. Benjamin Reavill — DeepRec, US GenAI and agentic-AI recruiting</h3>
+          <p>
+            Benjamin recruits across US GenAI, LLM, NLP, agentic AI, data, and software roles. His multi-client lane overlaps the product-facing agent and evaluation work in the current evidence.
+          </p>
+
+          <h2>Action-ready job opportunities</h2>
+          <h3>1. DoorDash — <a href="https://careersatdoordash.com">UX Design Engineer, Content Tooling</a></h3>
+          <p>
+            Hybrid work building React and TypeScript content tools, backend APIs, LLM workflows, experimentation pipelines, and adoption metrics. Apply only through the confirmed referral path.
+          </p>
+        </article>
+
+        <aside class="review-rail" aria-label="Comments">
+          <div class="comment-card">
+            <div class="comment-meta"><span>Comment</span><span>just now</span></div>
+            <p>Confirm the referral state before sending the separate DoorDash listing.</p>
+          </div>
+          <div class="mode-note">Comment controls only appear in Comment mode.</div>
+        </aside>
+      </div>
+    </main>
+
+    <script>
+      const workspace = document.querySelector("#workspace");
+      const viewButton = document.querySelector("#view-mode");
+      const commentButton = document.querySelector("#comment-mode");
+
+      function setMode(mode) {
+        const isView = mode === "view";
+        workspace.dataset.mode = mode;
+        viewButton.setAttribute("aria-pressed", String(isView));
+        commentButton.setAttribute("aria-pressed", String(!isView));
+      }
+
+      viewButton.addEventListener("click", () => setMode("view"));
+      commentButton.addEventListener("click", () => setMode("comment"));
+    </script>
+  </body>
+</html>

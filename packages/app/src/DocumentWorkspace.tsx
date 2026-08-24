@@ -6,8 +6,10 @@ import {
   CodeXml,
   Copy,
   Eye,
+  FileText,
   Loader2,
-  MessageSquarePlus,
+  MessageSquare,
+  MoreHorizontal,
   PencilLine,
   RefreshCcw,
   Upload,
@@ -21,13 +23,6 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "./components/ui/popover";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectItemText,
-  SelectTrigger,
-} from "./components/ui/select";
 import { Textarea } from "./components/ui/textarea";
 import {
   Tooltip,
@@ -110,16 +105,6 @@ function getRandomReviewCompleteTitleExcept(
   const index = Math.floor(random() * otherTitles.length);
   return otherTitles[Math.min(index, otherTitles.length - 1)];
 }
-
-const documentInteractionModeOptions = [
-  { value: "editing", label: "Editing", Icon: PencilLine },
-  { value: "suggesting", label: "Suggesting", Icon: MessageSquarePlus },
-  { value: "viewing", label: "Viewing", Icon: Eye },
-] satisfies {
-  value: DocumentInteractionMode;
-  label: string;
-  Icon: typeof Eye;
-}[];
 
 const conflictNoticeCopy: Record<
   Exclude<DiskChangeState, "clean">,
@@ -285,12 +270,7 @@ function getSaveStatusViewModel(
     };
   }
 
-  return {
-    label: "Saved",
-    ariaLabel: "Saved",
-    tone: "success" as const,
-    Icon: Check,
-  };
+  return null;
 }
 
 export function DocumentSaveStatusIndicator({
@@ -301,6 +281,8 @@ export function DocumentSaveStatusIndicator({
   diskChangeState: DiskChangeState;
 }) {
   const saveStatus = getSaveStatusViewModel(saveState, diskChangeState);
+  if (!saveStatus) return null;
+
   const SaveStatusIcon = saveStatus.Icon;
 
   return (
@@ -321,11 +303,74 @@ export function DocumentSaveStatusIndicator({
           (saveStatus.label === "Saving" ||
             saveStatus.label === "Unsaved changes") &&
             "animate-spin",
-          saveStatus.label === "Saved" && "document-save-status-saved",
         )}
         aria-hidden="true"
       />
     </span>
+  );
+}
+
+function DocumentModeControl({
+  mode,
+  onModeChange,
+}: {
+  mode: DocumentInteractionMode;
+  onModeChange: (mode: DocumentInteractionMode) => void;
+}) {
+  return (
+    <div
+      className="inline-flex shrink-0 items-center gap-0.5 rounded-[8px] border border-stone-300 bg-[#E8E3DB] p-0.5 shadow-[inset_0_1px_0_rgba(255,251,245,0.72)] dark:border-[#292c2a] dark:bg-[#151715] dark:shadow-none"
+      role="group"
+      aria-label="Document mode"
+      data-testid="document-mode-group"
+    >
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              type="button"
+              data-testid="document-mode-view"
+              aria-label="View mode"
+              aria-pressed={mode === "viewing"}
+              variant="ghost"
+              size="icon-xs"
+              className={cn(
+                "h-6 w-7 rounded-[5px] text-stone-500 hover:bg-[#FFFDFC]/70 hover:text-stone-700 dark:text-[#777c78] dark:hover:bg-[#222522] dark:hover:text-[#bfc3c0]",
+                mode === "viewing" &&
+                  "bg-[#FFFDFC] text-stone-700 shadow-[0_1px_2px_rgba(41,37,36,0.12)] hover:bg-[#FFFDFC] dark:bg-[#2a2d2b] dark:text-[#e7e9e7] dark:shadow-none dark:hover:bg-[#2a2d2b]",
+              )}
+              onClick={() => onModeChange("viewing")}
+            >
+              <Eye className="size-[0.75rem]" aria-hidden="true" />
+            </Button>
+          }
+        />
+        <TooltipContent>View mode</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              type="button"
+              data-testid="document-mode-comment"
+              aria-label="Comment mode"
+              aria-pressed={mode === "suggesting"}
+              variant="ghost"
+              size="icon-xs"
+              className={cn(
+                "h-6 w-7 rounded-[5px] text-stone-500 hover:bg-[#FFFDFC]/70 hover:text-stone-700 dark:text-[#777c78] dark:hover:bg-[#222522] dark:hover:text-[#bfc3c0]",
+                mode === "suggesting" &&
+                  "bg-[#FFFDFC] text-stone-700 shadow-[0_1px_2px_rgba(41,37,36,0.12)] hover:bg-[#FFFDFC] dark:bg-[#2a2d2b] dark:text-[#e7e9e7] dark:shadow-none dark:hover:bg-[#2a2d2b]",
+              )}
+              onClick={() => onModeChange("suggesting")}
+            >
+              <MessageSquare className="size-[0.75rem]" aria-hidden="true" />
+            </Button>
+          }
+        />
+        <TooltipContent>Comment mode</TooltipContent>
+      </Tooltip>
+    </div>
   );
 }
 
@@ -419,7 +464,7 @@ export function DocumentWorkspace({
   backend,
 }: DocumentWorkspaceProps) {
   const [documentInteractionMode, setDocumentInteractionMode] =
-    useState<DocumentInteractionMode>("suggesting");
+    useState<DocumentInteractionMode>("viewing");
   const [saveState, setSaveState] = useState<DocumentSaveState>("saved");
   const [reviewHandoffState, setReviewHandoffState] =
     useState<ReviewHandoffState>("idle");
@@ -437,6 +482,7 @@ export function DocumentWorkspace({
     useState(false);
   const sawNoWatcherAfterNotifiedRef = useRef(false);
   const copiedFileActionTimeoutRef = useRef<number | null>(null);
+  const previousActiveDocumentPathRef = useRef(activeDocumentPath);
   const saveControllerRef = useRef<DocumentSaveController | null>(null);
   const documentChangeTrackingReadyRef = useRef(false);
 
@@ -453,8 +499,9 @@ export function DocumentWorkspace({
       !!documentPage?.content &&
       criticMarkdownHasReviewRail(documentPage.content),
   );
-  const documentHeaderRef =
-    useReviewLayoutShiftAnimation<HTMLDivElement>(documentHasComments);
+  const documentHeaderRef = useReviewLayoutShiftAnimation<HTMLDivElement>(
+    documentInteractionMode !== "viewing" && documentHasComments,
+  );
 
   useEffect(() => {
     setDocumentHasComments(
@@ -475,6 +522,13 @@ export function DocumentWorkspace({
     }, 0);
     return () => window.clearTimeout(readyTimer);
   }, [activeDocumentPath, documentPage?.id]);
+
+  useEffect(() => {
+    if (previousActiveDocumentPathRef.current === activeDocumentPath) return;
+
+    previousActiveDocumentPathRef.current = activeDocumentPath;
+    setDocumentInteractionMode("viewing");
+  }, [activeDocumentPath]);
 
   useEffect(() => {
     if (!backend?.getReviewWatchStatus || !activeDocumentPath) {
@@ -664,11 +718,8 @@ export function DocumentWorkspace({
       documentPage ? markdownToPlainText(documentPage.content) : "",
     ),
   };
-  const activeDocumentInteractionMode = documentInteractionModeOptions.find(
-    (option) => option.value === documentInteractionMode,
-  );
-  const ActiveDocumentInteractionModeIcon =
-    activeDocumentInteractionMode?.Icon ?? PencilLine;
+  const EditorViewModeToggleIcon =
+    documentEditorViewMode === "rich-text" ? CodeXml : FileText;
   const conflictNotice =
     documentDiskChangeState === "clean"
       ? null
@@ -709,6 +760,8 @@ export function DocumentWorkspace({
   const reviewHandoffButtonDisabled =
     reviewHandoffDisabled && reviewHandoffState !== "notified";
   const trimmedOverallComment = overallComment.trim();
+  const showDocumentReviewRail =
+    documentInteractionMode !== "viewing" && documentHasComments;
 
   return (
     <div
@@ -732,7 +785,7 @@ export function DocumentWorkspace({
       <div
         className={cn(
           "fixed right-3 z-[60] flex max-w-[min(16rem,calc(100vw-1rem))] flex-col items-end gap-1.5",
-          conflictNotice ? "top-[19rem] sm:top-[7rem]" : "top-3",
+          conflictNotice ? "top-[19rem] sm:top-[7rem]" : "top-2",
         )}
         data-testid="document-status-stack"
         data-document-status-stack="true"
@@ -914,6 +967,10 @@ export function DocumentWorkspace({
               </PopoverContent>
             </Popover>
           ) : null}
+          <DocumentModeControl
+            mode={documentInteractionMode}
+            onModeChange={setDocumentInteractionMode}
+          />
         </div>
       </div>
       {conflictNotice ? (
@@ -976,46 +1033,38 @@ export function DocumentWorkspace({
           </div>
         </div>
       ) : null}
-      <div className="mx-auto min-h-full max-w-[1080px]">
+      <div className="mx-auto min-h-full max-w-[88rem]">
         {documentPage ? (
           <div
             ref={documentHeaderRef}
             data-testid="document-page-header"
             className={cn(
-              "review-layout-grid document-page-shell mb-2 text-[0.62rem] font-medium tracking-[0.01em] text-stone-400",
-              !documentHasComments &&
-                "review-layout-grid--centered document-page-shell-no-comments",
+              "document-page-shell mb-2 flex flex-col gap-6 text-[0.62rem] font-medium tracking-[0.01em] text-stone-400 min-[1504px]:grid min-[1504px]:grid-cols-[minmax(0,62rem)_minmax(24rem,1fr)] min-[1504px]:items-start min-[1504px]:justify-between min-[1504px]:gap-8",
+              !showDocumentReviewRail &&
+                "document-page-shell-no-comments min-[1504px]:grid-cols-[minmax(0,62rem)] min-[1504px]:justify-center",
             )}
           >
-            <div className="review-layout-main document-page-main w-full max-w-[46.5rem] min-w-0">
+            <div className="document-page-main w-full max-w-[62rem] min-w-0">
               <div className="flex w-full flex-wrap items-center gap-1.5 px-1">
                 <Tooltip>
                   <TooltipTrigger
                     render={
-                      <button
+                      <Button
                         type="button"
                         data-testid="document-editor-view-toggle"
-                        className="grid shrink-0 grid-cols-2 rounded-[999px] bg-[#E8E3DB] dark:bg-slate-800 px-[2px] pt-[3px] pb-[2px] shadow-[inset_0_1px_0_rgba(255,251,245,0.72)] dark:border-b dark:border-b-slate-800 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]"
+                        variant="ghost"
+                        size="icon-xs"
+                        className="text-stone-400 hover:bg-[#EEE9E1] hover:text-stone-600 dark:text-stone-500 dark:hover:bg-slate-800 dark:hover:text-stone-300"
                       >
-                        <span
-                          className={`flex w-[1.375rem] items-center justify-center rounded-full py-[2px] transition ${
+                        <EditorViewModeToggleIcon
+                          data-testid={`document-editor-view-toggle-icon-${
                             documentEditorViewMode === "rich-text"
-                              ? "bg-[#FFFDFC] dark:bg-slate-600 text-stone-700 dark:text-white shadow-[0_1px_2px_rgba(41,37,36,0.12)]"
-                              : "text-stone-500 dark:text-slate-400"
+                              ? "code"
+                              : "rich-text"
                           }`}
-                        >
-                          <Eye className="size-[0.75rem]" />
-                        </span>
-                        <span
-                          className={`flex w-[1.375rem] items-center justify-center rounded-full py-[2px] transition ${
-                            documentEditorViewMode === "code"
-                              ? "bg-[#FFFDFC] dark:bg-slate-600 text-stone-700 dark:text-white shadow-[0_1px_2px_rgba(41,37,36,0.12)]"
-                              : "text-stone-500 dark:text-slate-400"
-                          }`}
-                        >
-                          <CodeXml className="size-[0.75rem]" />
-                        </span>
-                      </button>
+                          className="size-[0.75rem]"
+                        />
+                      </Button>
                     }
                     aria-label={editorViewModeToggleLabel}
                     onClick={() =>
@@ -1034,21 +1083,20 @@ export function DocumentWorkspace({
                 >
                   <PopoverTrigger
                     render={
-                      <button
+                      <Button
                         type="button"
                         data-testid="document-file-menu-trigger"
-                        className="inline-flex min-w-0 max-w-full items-center gap-1 rounded-full px-1 py-0.5 text-[0.8rem] font-medium tracking-[0.01em] text-stone-400 outline-none transition hover:text-stone-500 focus-visible:ring-2 focus-visible:ring-stone-300/70 dark:text-slate-400 dark:hover:text-slate-300 dark:focus-visible:ring-slate-600/70"
+                        variant="ghost"
+                        size="icon-xs"
+                        className="text-stone-400 hover:bg-[#EEE9E1] hover:text-stone-600 dark:text-stone-500 dark:hover:bg-slate-800 dark:hover:text-stone-300"
                         title={documentFilenameLabel}
                         aria-label="Document file actions"
                       >
-                        <span className="min-w-0 truncate">
-                          {documentFilenameLabel}
-                        </span>
-                        <ChevronDown
-                          className="size-[0.62rem] shrink-0"
+                        <MoreHorizontal
+                          className="size-[0.75rem]"
                           aria-hidden="true"
                         />
-                      </button>
+                      </Button>
                     }
                   />
                   <PopoverContent
@@ -1087,44 +1135,14 @@ export function DocumentWorkspace({
                     </div>
                   </PopoverContent>
                 </Popover>
-                <div className="ml-auto inline-flex h-[1.25rem] shrink-0 items-center">
-                  <Select<DocumentInteractionMode>
-                    value={documentInteractionMode}
-                    onValueChange={(value) => {
-                      if (value) setDocumentInteractionMode(value);
-                    }}
-                  >
-                    <SelectTrigger
-                      data-testid="document-mode-trigger"
-                      aria-label="Document mode"
-                      className="h-[1.5rem] gap-1.5 px-1 text-[0.8rem] leading-[1.25rem] font-medium tracking-[0.01em] text-stone-400 dark:text-slate-400 hover:text-stone-500 dark:hover:text-slate-300"
-                    >
-                      <ActiveDocumentInteractionModeIcon className="size-[0.8rem]" />
-                      <span className="truncate">
-                        {activeDocumentInteractionMode?.label}
-                      </span>
-                    </SelectTrigger>
-                    <SelectContent>
-                      {documentInteractionModeOptions.map(
-                        ({ value, label, Icon }) => (
-                          <SelectItem
-                            key={value}
-                            value={value}
-                            label={label}
-                            className="text-[0.8rem]"
-                          >
-                            <Icon className="size-3 text-stone-500 dark:text-slate-400" />
-                            <SelectItemText className="font-medium">
-                              {label}
-                            </SelectItemText>
-                          </SelectItem>
-                        ),
-                      )}
-                    </SelectContent>
-                  </Select>
-                </div>
               </div>
             </div>
+            {showDocumentReviewRail ? (
+              <div
+                className="document-comment-rail pointer-events-none invisible hidden min-[1504px]:block"
+                aria-hidden="true"
+              />
+            ) : null}
           </div>
         ) : null}
         {documentPage ? (

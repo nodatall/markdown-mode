@@ -97,6 +97,14 @@ describe("toHtml", () => {
     );
   });
 
+  it("adds stable, unique fragment ids to rendered headings", () => {
+    const html = toHtml("# Section\n\n## Section\n\n### Café & Tea\n");
+
+    expect(html).toContain('<h1 id="section">Section</h1>');
+    expect(html).toContain('<h2 id="section-1">Section</h2>');
+    expect(html).toContain('<h3 id="cafe-tea">Café &amp; Tea</h3>');
+  });
+
   it("round-trips headerless HTML tables to valid GFM table markdown", () => {
     expect(toMarkdown(toHtml(readMarkdownFixture("headerless-table.md")))).toBe(
       [

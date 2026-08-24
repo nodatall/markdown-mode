@@ -51,6 +51,28 @@ export interface CriticChangeAttrs {
 
 export const SUGGESTED_PARAGRAPH_SENTINEL = "\u2060";
 
+const HeadingId = Extension.create({
+  name: "headingId",
+
+  addGlobalAttributes() {
+    return [
+      {
+        types: ["heading"],
+        attributes: {
+          id: {
+            default: null,
+            parseHTML: (element) => element.getAttribute("id"),
+            renderHTML: (attributes) =>
+              typeof attributes.id === "string" && attributes.id
+                ? { id: attributes.id }
+                : {},
+          },
+        },
+      },
+    ];
+  },
+});
+
 const CommentRef = Mark.create({
   name: "commentRef",
   priority: 1100,
@@ -777,6 +799,7 @@ export function createEditorExtensions(placeholder: string) {
       codeBlock: false,
       link: false,
     }),
+    HeadingId,
     Placeholder.configure({
       placeholder,
     }),

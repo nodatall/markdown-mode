@@ -5,6 +5,7 @@ import {
   codeEditor,
   createMarkdownProject,
   documentSaveStatus,
+  enterCommentMode,
   logE2eEvent,
   openMarkdownFile,
   readProjectFile,
@@ -77,6 +78,7 @@ test.describe("markdown round-trips", () => {
     const filePath = writeProjectFile(projectDir, "code-save.md", initial);
 
     await openMarkdownFile(page, filePath, "code");
+    await enterCommentMode(page);
     await appendInCodeEditor(page, "\nSaved from Playwright.\n");
 
     await expect
@@ -91,7 +93,7 @@ test.describe("markdown round-trips", () => {
     });
   });
 
-  test("initial open shows persistent saved status", async ({ page }) => {
+  test("initial open keeps settled saved status silent", async ({ page }) => {
     const filePath = writeProjectFile(
       projectDir,
       "initial-saved.md",
@@ -100,10 +102,7 @@ test.describe("markdown round-trips", () => {
 
     await openMarkdownFile(page, filePath);
 
-    await expect(documentSaveStatus(page)).toHaveAttribute(
-      "aria-label",
-      "Saved",
-    );
+    await expect(documentSaveStatus(page)).toHaveCount(0);
 
     logE2eEvent("markdown-roundtrip.initial-saved", {
       file: "initial-saved.md",
@@ -117,6 +116,7 @@ test.describe("markdown round-trips", () => {
     const filePath = writeProjectFile(projectDir, "manual-save.md", initial);
 
     await openMarkdownFile(page, filePath, "code");
+    await enterCommentMode(page);
     await appendInCodeEditor(page, "\nSaved by shortcut.\n");
 
     await page.keyboard.press(
@@ -126,10 +126,7 @@ test.describe("markdown round-trips", () => {
     await expect
       .poll(() => readProjectFile(projectDir, "manual-save.md"))
       .toContain("Saved by shortcut.");
-    await expect(documentSaveStatus(page)).toHaveAttribute(
-      "aria-label",
-      "Saved",
-    );
+    await expect(documentSaveStatus(page)).toHaveCount(0);
 
     logE2eEvent("markdown-roundtrip.manual-save-shortcut", {
       file: "manual-save.md",
@@ -144,6 +141,7 @@ test.describe("markdown round-trips", () => {
     const filePath = writeProjectFile(projectDir, "rich-save.md", initial);
 
     await openMarkdownFile(page, filePath, "rich-text");
+    await enterCommentMode(page);
     const editor = richTextEditor(page);
     await expect(editor).toBeVisible();
     await editor.click();
@@ -158,10 +156,7 @@ test.describe("markdown round-trips", () => {
     await expect
       .poll(() => readProjectFile(projectDir, "rich-save.md"))
       .toContain("Saved by shortcut.");
-    await expect(documentSaveStatus(page)).toHaveAttribute(
-      "aria-label",
-      "Saved",
-    );
+    await expect(documentSaveStatus(page)).toHaveCount(0);
 
     logE2eEvent("markdown-roundtrip.rich-manual-save", {
       file: "rich-save.md",
@@ -211,10 +206,7 @@ test.describe("markdown round-trips", () => {
         { defaultPrevented: true, metaKey: true, ctrlKey: false },
         { defaultPrevented: true, metaKey: false, ctrlKey: true },
       ]);
-      await expect(documentSaveStatus(page)).toHaveAttribute(
-        "aria-label",
-        "Saved",
-      );
+      await expect(documentSaveStatus(page)).toHaveCount(0);
     }
 
     logE2eEvent("markdown-roundtrip.save-default-prevented", {

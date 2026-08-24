@@ -658,15 +658,19 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
     commentsRef.current = comments;
   }, [comments]);
 
-  useEffect(() => {
-    interactionModeRef.current = interactionMode;
-  }, [interactionMode]);
+  interactionModeRef.current = interactionMode;
 
   useEffect(() => {
     onCommentRailPresenceChange?.(
-      comments.size > 0 || criticChanges.length > 0,
+      interactionMode !== "viewing" &&
+        (comments.size > 0 || criticChanges.length > 0),
     );
-  }, [comments.size, criticChanges.length, onCommentRailPresenceChange]);
+  }, [
+    comments.size,
+    criticChanges.length,
+    interactionMode,
+    onCommentRailPresenceChange,
+  ]);
 
   const emitMarkdownChange = useCallback(
     (doc?: JSONContent, nextComments?: Map<string, CriticComment>) => {
@@ -757,6 +761,10 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
         handleDrop: (_view, event) => {
           const files = Array.from(event.dataTransfer?.files ?? []);
           if (files.length === 0) return false;
+          if (interactionModeRef.current === "viewing") {
+            event.preventDefault();
+            return true;
+          }
           event.preventDefault();
           void insertFiles(files);
           return true;
@@ -764,6 +772,11 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
         handlePaste: (view, event) => {
           const files = Array.from(event.clipboardData?.files ?? []);
           if (files.length > 0) {
+            if (interactionModeRef.current === "viewing") {
+              event.preventDefault();
+              return true;
+            }
+
             event.preventDefault();
             void insertFiles(files);
             return true;
@@ -1238,6 +1251,17 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
     editor?.setEditable(interactionMode !== "viewing", false);
   }, [editor, interactionMode]);
 
+  useEffect(() => {
+    if (interactionMode !== "viewing") return;
+
+    setSelectedCommentId(null);
+    setHoveredCommentId(null);
+    setSelectedChangeId(null);
+    setHoveredChangeId(null);
+    setDraftSuggestion(null);
+    setPendingFocusCommentId(null);
+  }, [interactionMode]);
+
   const activeCommentIds =
     useEditorState({
       editor,
@@ -1254,7 +1278,10 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
     }) ?? [];
 
   const { commentGroups, contentHeight, measureLayout } =
-    useCommentAnchorLayout(editor, comments.size > 0);
+    useCommentAnchorLayout(
+      editor,
+      interactionMode !== "viewing" && comments.size > 0,
+    );
 
   useEffect(() => {
     onEditorReady?.(editor);
@@ -1265,16 +1292,20 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
   }, [editor, onEditorReady]);
 
   useEffect(() => {
+    if (interactionMode === "viewing") return;
+
     setSelectedCommentId((current) =>
       getPreferredCommentId(activeCommentIds, current),
     );
-  }, [activeCommentIds]);
+  }, [activeCommentIds, interactionMode]);
 
   useEffect(() => {
+    if (interactionMode === "viewing") return;
+
     setSelectedChangeId((current) =>
       getPreferredCriticChangeId(activeChangeIds, current),
     );
-  }, [activeChangeIds]);
+  }, [activeChangeIds, interactionMode]);
 
   useEffect(() => {
     if (!editor) return;
@@ -1299,14 +1330,21 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
   }, [editor, parsedContent, refreshCriticChanges]);
 
   useEffect(() => {
-    if (!editor || !selected || !focusRequestKey) return;
+    if (
+      !editor ||
+      interactionMode === "viewing" ||
+      !selected ||
+      !focusRequestKey
+    ) {
+      return;
+    }
     if (lastFocusRequestKeyRef.current === focusRequestKey) return;
     lastFocusRequestKeyRef.current = focusRequestKey;
 
     requestAnimationFrame(() => {
       editor.chain().focus("end").run();
     });
-  }, [editor, focusRequestKey, selected]);
+  }, [editor, focusRequestKey, interactionMode, selected]);
 
   useEffect(() => {
     if (selectedCommentId && !comments.has(selectedCommentId)) {
@@ -1328,11 +1366,13 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
 
     editor.view.dispatch(
       editor.state.tr.setMeta(commentHighlightPluginKey, {
-        selectedCommentId,
-        hoveredCommentId: effectiveHoveredCommentId,
+        selectedCommentId:
+          interactionMode === "viewing" ? null : selectedCommentId,
+        hoveredCommentId:
+          interactionMode === "viewing" ? null : effectiveHoveredCommentId,
       }),
     );
-  }, [editor, hoveredCommentId, selectedCommentId]);
+  }, [editor, hoveredCommentId, interactionMode, selectedCommentId]);
 
   useEffect(() => {
     if (!editor) return;
@@ -1341,14 +1381,16 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
 
     editor.view.dispatch(
       editor.state.tr.setMeta(criticChangeHighlightPluginKey, {
-        selectedChangeId,
-        hoveredChangeId: effectiveHoveredChangeId,
+        selectedChangeId:
+          interactionMode === "viewing" ? null : selectedChangeId,
+        hoveredChangeId:
+          interactionMode === "viewing" ? null : effectiveHoveredChangeId,
       }),
     );
-  }, [editor, hoveredChangeId, selectedChangeId]);
+  }, [editor, hoveredChangeId, interactionMode, selectedChangeId]);
 
   useEffect(() => {
-    if (!editor) return;
+    if (!editor || interactionMode === "viewing") return;
 
     const anchorElements = editor.view.dom.querySelectorAll<HTMLElement>(
       ".comment-anchor[data-comment-ids]",
@@ -1400,10 +1442,10 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
         cleanup();
       }
     };
-  }, [editor]);
+  }, [editor, interactionMode]);
 
   useEffect(() => {
-    if (!editor) return;
+    if (!editor || interactionMode === "viewing") return;
 
     const changeElements = editor.view.dom.querySelectorAll<HTMLElement>(
       ".critic-change[data-critic-change-id]",
@@ -1443,9 +1485,11 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
         cleanup();
       }
     };
-  }, [editor]);
+  }, [editor, interactionMode]);
 
   useEffect(() => {
+    if (interactionMode === "viewing") return;
+
     const handleDocumentPointerDown = (event: PointerEvent) => {
       if (!selectedCommentIdRef.current && !selectedChangeIdRef.current) return;
       if (!shouldDismissCommentThread(event.target)) return;
@@ -1466,7 +1510,7 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
         true,
       );
     };
-  }, []);
+  }, [interactionMode]);
 
   const handleAddComment = useCallback(() => {
     const currentEditor = editorRef.current;
@@ -1870,40 +1914,43 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
     );
   }, []);
 
-  const hasReviewRail = comments.size > 0 || criticChanges.length > 0;
+  const hasReviewRail =
+    interactionMode !== "viewing" &&
+    (comments.size > 0 || criticChanges.length > 0);
   const documentShellRef =
     useReviewLayoutShiftAnimation<HTMLDivElement>(hasReviewRail);
-  const activeComments = activeCommentIds
-    .map((commentId) => comments.get(commentId))
-    .filter((comment): comment is CriticComment => Boolean(comment));
-  const contentCardClass =
-    "rounded-[0.75rem] border border-[#E9E9E8] dark:border-slate-800 bg-white dark:bg-card shadow-[0_18px_44px_rgba(57,47,38,0.08)] dark:shadow-[0_18px_44px_rgba(0,0,0,0.35)]";
+  const activeComments =
+    interactionMode === "viewing"
+      ? []
+      : activeCommentIds
+          .map((commentId) => comments.get(commentId))
+          .filter((comment): comment is CriticComment => Boolean(comment));
+  const embeddedContentCardClass =
+    "rounded-[0.75rem] border border-[#E9E9E8] dark:border-slate-700 bg-white dark:bg-card shadow-[0_18px_44px_rgba(57,47,38,0.08)] dark:shadow-[0_18px_44px_rgba(0,0,0,0.35)]";
   const documentShellClass = cn(
     "document-page-shell",
     layout === "embedded-demo"
       ? "grid grid-cols-1 gap-3 p-4 min-[900px]:grid-cols-[minmax(0,min(100%,42rem))_minmax(13rem,16rem)] min-[900px]:items-start min-[900px]:justify-start"
-      : "review-layout-grid",
+      : "flex flex-col gap-6 min-[1504px]:grid min-[1504px]:grid-cols-[minmax(0,62rem)_minmax(24rem,1fr)] min-[1504px]:items-start min-[1504px]:justify-between min-[1504px]:gap-8",
     !hasReviewRail && "document-page-shell-no-comments",
     layout !== "embedded-demo" &&
       !hasReviewRail &&
-      "review-layout-grid--centered",
+      "min-[1504px]:grid-cols-[minmax(0,62rem)] min-[1504px]:justify-center",
   );
   const documentMainClass = cn(
     "document-page-main w-full min-w-0",
-    layout === "embedded-demo"
-      ? "max-w-none"
-      : "review-layout-main max-w-[46.5rem]",
+    layout === "embedded-demo" ? "max-w-none" : "max-w-[62rem]",
   );
   const contentInsetClass = layout === "embedded-demo" ? "pb-0" : "pb-24";
   const fallbackClass = cn(
     "document-comment-fallback mb-4",
-    layout === "embedded-demo" ? "hidden" : "min-[1100px]:hidden",
+    layout === "embedded-demo" ? "hidden" : "min-[1504px]:hidden",
   );
   const reviewRailClass = cn(
     "document-comment-rail",
     layout === "embedded-demo"
       ? "block px-4 pb-4 min-[900px]:p-0"
-      : "review-layout-rail hidden min-[1100px]:block",
+      : "hidden min-[1504px]:block",
   );
 
   return (
@@ -1946,11 +1993,17 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
           <div className={contentInsetClass}>
             <div
               data-testid="document-content-card"
-              className={cn(contentCardClass, "px-10 py-10 sm:px-14 sm:py-14")}
+              className={cn(
+                "py-10 sm:py-14",
+                layout === "embedded-demo"
+                  ? cn(embeddedContentCardClass, "px-10 sm:px-14")
+                  : "bg-transparent px-0 min-[900px]:px-16",
+              )}
             >
               <EditorContextMenu
                 editor={editor}
                 backend={backend}
+                viewOnly={interactionMode === "viewing"}
                 resolveLinkUrl={resolveLinkUrl}
                 onAddComment={
                   interactionMode === "viewing" ? undefined : handleAddComment
@@ -1978,52 +2031,54 @@ const RichTextEditorSurface = memo(function RichTextEditorSurface({
             </div>
           </div>
         </div>
-        <DocumentReviewRail
-          className={reviewRailClass}
-          layout={layout === "embedded-demo" ? "flow" : "anchored"}
-          testId="document-review-rail"
-          commentGroups={commentGroups}
-          comments={comments}
-          suggestions={criticChanges}
-          selectedCommentId={selectedCommentId}
-          hoveredCommentId={hoveredCommentId}
-          selectedChangeId={selectedChangeId}
-          hoveredChangeId={hoveredChangeId}
-          contentHeight={contentHeight}
-          onDeleteComment={deleteComment}
-          onUpdateComment={(commentId, nextContent) => {
-            updateComment(commentId, (current) => ({
-              ...current,
-              content: nextContent,
-            }));
-          }}
-          onReplyComment={replyToComment}
-          onSelectComment={selectComment}
-          onFocusComment={focusComment}
-          onHoverComment={setHoveredCommentId}
-          onAcceptSuggestion={acceptSuggestion}
-          onRejectSuggestion={rejectSuggestion}
-          onReplySuggestion={replyToSuggestion}
-          onSelectSuggestion={selectSuggestion}
-          onFocusSuggestion={focusSuggestion}
-          onHoverSuggestion={setHoveredChangeId}
-          pendingFocusCommentId={pendingFocusCommentId}
-          newCommentDraftIds={newCommentDraftIds}
-          onAutoFocusComment={(commentId) => {
-            setPendingFocusCommentId((current) =>
-              current === commentId ? null : current,
-            );
-          }}
-          draftSuggestion={draftSuggestion}
-          onDraftSuggestionTextChange={(text) => {
-            setDraftSuggestion((current) =>
-              current ? { ...current, text } : current,
-            );
-          }}
-          onApplyDraftSuggestion={applyDraftSuggestion}
-          onCancelDraftSuggestion={() => setDraftSuggestion(null)}
-          editor={editor}
-        />
+        {hasReviewRail ? (
+          <DocumentReviewRail
+            className={reviewRailClass}
+            layout={layout === "embedded-demo" ? "flow" : "anchored"}
+            testId="document-review-rail"
+            commentGroups={commentGroups}
+            comments={comments}
+            suggestions={criticChanges}
+            selectedCommentId={selectedCommentId}
+            hoveredCommentId={hoveredCommentId}
+            selectedChangeId={selectedChangeId}
+            hoveredChangeId={hoveredChangeId}
+            contentHeight={contentHeight}
+            onDeleteComment={deleteComment}
+            onUpdateComment={(commentId, nextContent) => {
+              updateComment(commentId, (current) => ({
+                ...current,
+                content: nextContent,
+              }));
+            }}
+            onReplyComment={replyToComment}
+            onSelectComment={selectComment}
+            onFocusComment={focusComment}
+            onHoverComment={setHoveredCommentId}
+            onAcceptSuggestion={acceptSuggestion}
+            onRejectSuggestion={rejectSuggestion}
+            onReplySuggestion={replyToSuggestion}
+            onSelectSuggestion={selectSuggestion}
+            onFocusSuggestion={focusSuggestion}
+            onHoverSuggestion={setHoveredChangeId}
+            pendingFocusCommentId={pendingFocusCommentId}
+            newCommentDraftIds={newCommentDraftIds}
+            onAutoFocusComment={(commentId) => {
+              setPendingFocusCommentId((current) =>
+                current === commentId ? null : current,
+              );
+            }}
+            draftSuggestion={draftSuggestion}
+            onDraftSuggestionTextChange={(text) => {
+              setDraftSuggestion((current) =>
+                current ? { ...current, text } : current,
+              );
+            }}
+            onApplyDraftSuggestion={applyDraftSuggestion}
+            onCancelDraftSuggestion={() => setDraftSuggestion(null)}
+            editor={editor}
+          />
+        ) : null}
       </div>
     </div>
   );
@@ -2036,31 +2091,30 @@ const CodeEditorSurface = memo(function CodeEditorSurface({
   layout,
   onMarkdownChange,
 }: CodeEditorSurfaceProps) {
+  const showReviewRail = interactionMode !== "viewing" && hasCommentRailSpace;
   const documentShellClass = cn(
     "document-page-shell",
     layout === "embedded-demo"
       ? "grid grid-cols-1 gap-3 p-4 min-[900px]:grid-cols-[minmax(0,min(100%,42rem))_minmax(13rem,16rem)] min-[900px]:items-start min-[900px]:justify-start"
-      : "review-layout-grid",
-    !hasCommentRailSpace && "document-page-shell-no-comments",
+      : "flex flex-col gap-6 min-[1504px]:grid min-[1504px]:grid-cols-[minmax(0,62rem)_minmax(24rem,1fr)] min-[1504px]:items-start min-[1504px]:justify-between min-[1504px]:gap-8",
+    !showReviewRail && "document-page-shell-no-comments",
     layout !== "embedded-demo" &&
-      !hasCommentRailSpace &&
-      "review-layout-grid--centered",
+      !showReviewRail &&
+      "min-[1504px]:grid-cols-[minmax(0,62rem)] min-[1504px]:justify-center",
   );
   const documentMainClass = cn(
     "document-page-main w-full min-w-0",
-    layout === "embedded-demo"
-      ? "max-w-none"
-      : "review-layout-main max-w-[46.5rem]",
+    layout === "embedded-demo" ? "max-w-none" : "max-w-[62rem]",
   );
   const contentInsetClass = layout === "embedded-demo" ? "pb-0" : "pb-24";
   const reviewRailClass = cn(
     "document-comment-rail pointer-events-none invisible",
     layout === "embedded-demo"
       ? "block px-4 pb-4 min-[900px]:p-0"
-      : "review-layout-rail hidden min-[1100px]:block",
+      : "hidden min-[1504px]:block",
   );
   const documentShellRef =
-    useReviewLayoutShiftAnimation<HTMLDivElement>(hasCommentRailSpace);
+    useReviewLayoutShiftAnimation<HTMLDivElement>(showReviewRail);
 
   return (
     <div className="cursor-text bg-transparent" data-testid="page-card-code">
@@ -2072,7 +2126,12 @@ const CodeEditorSurface = memo(function CodeEditorSurface({
         <div className={documentMainClass}>
           <div className={contentInsetClass}>
             <div
-              className="min-h-[calc(70vh+4rem)] rounded-[0.75rem] border border-[#E9E9E8] dark:border-slate-800 bg-white dark:bg-card py-10 pr-6 pl-5 shadow-[0_18px_44px_rgba(57,47,38,0.08)] dark:shadow-[0_18px_44px_rgba(0,0,0,0.35)] sm:py-14 sm:pr-10 sm:pl-8"
+              className={cn(
+                "min-h-[calc(70vh+4rem)] py-10 sm:py-14",
+                layout === "embedded-demo"
+                  ? "rounded-[0.75rem] border border-[#E9E9E8] bg-white py-10 pr-6 pl-5 shadow-[0_18px_44px_rgba(57,47,38,0.08)] sm:py-14 sm:pr-10 sm:pl-8 dark:border-slate-700 dark:bg-card dark:shadow-[0_18px_44px_rgba(0,0,0,0.35)]"
+                  : "bg-transparent px-0 min-[900px]:px-16",
+              )}
               data-testid="document-content-card"
             >
               <MarkdownCodeEditor
@@ -2085,7 +2144,7 @@ const CodeEditorSurface = memo(function CodeEditorSurface({
             </div>
           </div>
         </div>
-        {hasCommentRailSpace ? (
+        {showReviewRail ? (
           <div
             data-testid="document-review-rail"
             className={reviewRailClass}
@@ -2337,17 +2396,19 @@ const PageCardEditorSurface = memo(function PageCardEditorSurface({
     () => criticMarkdownHasReviewRail(markdown),
     [markdown],
   );
+  const reportedCommentRailSpace =
+    interactionMode !== "viewing" && hasCommentRailSpace;
 
   useEffect(() => {
     if (editorViewMode !== "code") return;
-    onCommentRailPresenceChange?.(hasCommentRailSpace);
-  }, [editorViewMode, hasCommentRailSpace, onCommentRailPresenceChange]);
+    onCommentRailPresenceChange?.(reportedCommentRailSpace);
+  }, [editorViewMode, onCommentRailPresenceChange, reportedCommentRailSpace]);
 
   if (editorViewMode === "code") {
     return (
       <CodeEditorSurface
         markdown={markdown}
-        hasCommentRailSpace={hasCommentRailSpace}
+        hasCommentRailSpace={reportedCommentRailSpace}
         interactionMode={interactionMode}
         layout={layout}
         onMarkdownChange={handleMarkdownChange}

@@ -50,6 +50,17 @@ export function documentSaveStatus(page: Page) {
   return page.getByTestId("document-save-status");
 }
 
+export async function enterCommentMode(page: Page) {
+  const commentMode = page.getByTestId("document-mode-comment");
+  await expect(commentMode).toBeVisible();
+
+  if ((await commentMode.getAttribute("aria-pressed")) !== "true") {
+    await commentMode.click();
+  }
+
+  await expect(commentMode).toHaveAttribute("aria-pressed", "true");
+}
+
 export function fileConflictNotice(page: Page) {
   return page.getByTestId("file-conflict-notice");
 }

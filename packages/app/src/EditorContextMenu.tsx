@@ -25,12 +25,13 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "./components/ui/tooltip";
-import { toHtml } from "./markdown";
+import { isExternalUrl, toHtml } from "./markdown";
 import type { StorageBackend } from "./storage";
 
 interface EditorContextMenuProps {
   editor: Editor | null;
   backend: StorageBackend;
+  viewOnly: boolean;
   resolveLinkUrl?: (path: string) => string | null;
   onAddComment?: () => void;
   onSuggestDeletion?: () => void;
@@ -71,7 +72,7 @@ function getNavigatorPlatform() {
 }
 
 function isResolvedLinkTarget(value: string) {
-  return /^(?:[a-z]+:)?\/\//i.test(value) || value.startsWith("data:");
+  return isExternalUrl(value);
 }
 
 function isLinkTarget(value: string) {
@@ -206,6 +207,7 @@ function SelectionMenuButton({
 export function EditorContextMenu({
   editor,
   backend,
+  viewOnly,
   resolveLinkUrl,
   onAddComment,
   onSuggestDeletion,
@@ -295,6 +297,7 @@ export function EditorContextMenu({
 
   const updateSelectionActionPosition = useCallback(() => {
     if (
+      viewOnly ||
       !editor?.isFocused ||
       (editor.state.selection.empty && !onSuggestInsertion)
     ) {
@@ -330,7 +333,7 @@ export function EditorContextMenu({
       left: nextLeft,
       top: nextTop,
     });
-  }, [editor, onSuggestInsertion]);
+  }, [editor, onSuggestInsertion, viewOnly]);
 
   const updateLinkPopover = useCallback(() => {
     setLinkPopoverState((current) => {
@@ -422,6 +425,38 @@ export function EditorContextMenu({
       });
     },
     [backend, editor, resolveLinkUrl],
+  );
+
+  const openExistingLink = useCallback(
+    (anchor: HTMLAnchorElement) => {
+      const rawHref =
+        anchor.getAttribute("data-markdown-src") ||
+        anchor.getAttribute("href") ||
+        "";
+      const target = resolveEditableLinkTarget(
+        rawHref,
+        backend,
+        resolveLinkUrl,
+        anchor.href,
+      );
+
+      if (!target) return;
+
+      if (target.startsWith("#")) {
+        window.history.pushState(null, "", target);
+        let anchorId = target.slice(1);
+        try {
+          anchorId = decodeURIComponent(anchorId);
+        } catch {
+          // Keep the raw fragment when it is not valid percent-encoding.
+        }
+        document.getElementById(anchorId)?.scrollIntoView?.();
+        return;
+      }
+
+      window.open(target, "_blank", "noopener,noreferrer");
+    },
+    [backend, resolveLinkUrl],
   );
 
   const openLinkPopover = useCallback(() => {
@@ -531,7 +566,7 @@ export function EditorContextMenu({
   ]);
 
   useEffect(() => {
-    if (!editor) return;
+    if (!editor || viewOnly) return;
 
     const schedulePositionUpdate = () => {
       requestAnimationFrame(() => {
@@ -585,7 +620,20 @@ export function EditorContextMenu({
       window.removeEventListener("resize", schedulePositionUpdate);
       window.removeEventListener("scroll", schedulePositionUpdate, true);
     };
-  }, [editor, onAddComment, updateLinkPopover, updateSelectionActionPosition]);
+  }, [
+    editor,
+    onAddComment,
+    updateLinkPopover,
+    updateSelectionActionPosition,
+    viewOnly,
+  ]);
+
+  useEffect(() => {
+    if (!viewOnly) return;
+    setPosition(null);
+    setSelectionActionPosition(null);
+    setLinkPopoverState(null);
+  }, [viewOnly]);
 
   useEffect(() => {
     if (!linkPopoverState) return;
@@ -642,8 +690,18 @@ export function EditorContextMenu({
     <div
       ref={containerRef}
       className="relative"
-      onMouseDownCapture={(event) => {
+      onClickCapture={(event) => {
         if (!editor || !containerRef.current) return;
+
+        if (
+          event.button !== 0 ||
+          event.metaKey ||
+          event.ctrlKey ||
+          event.shiftKey ||
+          event.altKey
+        ) {
+          return;
+        }
 
         const target = event.target as Node;
         const candidate = getElementFromDomNode(target);
@@ -657,16 +715,42 @@ export function EditorContextMenu({
         }
 
         event.preventDefault();
-        openExistingLinkPopover(anchor);
+        if (viewOnly) {
+          openExistingLink(anchor);
+        } else {
+          openExistingLinkPopover(anchor);
+        }
       }}
-      onContextMenu={(event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        setPosition({ x: event.clientX, y: event.clientY });
-      }}
+      onContextMenu={
+        viewOnly
+          ? undefined
+          : (event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              setPosition({ x: event.clientX, y: event.clientY });
+            }
+      }
+      onPasteCapture={
+        viewOnly
+          ? (event) => {
+              if (event.clipboardData.files.length === 0) return;
+              event.preventDefault();
+              event.stopPropagation();
+            }
+          : undefined
+      }
+      onDropCapture={
+        viewOnly
+          ? (event) => {
+              if (event.dataTransfer.files.length === 0) return;
+              event.preventDefault();
+              event.stopPropagation();
+            }
+          : undefined
+      }
     >
       {children}
-      {renderedSelectionMenu ? (
+      {!viewOnly && renderedSelectionMenu ? (
         <div
           className="absolute z-30 -translate-x-1/2 -translate-y-full"
           style={{
@@ -809,7 +893,7 @@ export function EditorContextMenu({
           </div>
         </div>
       ) : null}
-      {linkPopoverState ? (
+      {!viewOnly && linkPopoverState ? (
         <div
           ref={linkPopoverRef}
           data-testid="link-popover"
@@ -899,7 +983,7 @@ export function EditorContextMenu({
           </button>
         </div>
       ) : null}
-      {position ? (
+      {!viewOnly && position ? (
         <div
           ref={menuRef}
           data-testid="editor-context-menu"
