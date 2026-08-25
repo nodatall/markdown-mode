@@ -49,6 +49,26 @@
     height: 100%;
   }
 
+  html.dark {
+    color-scheme: dark;
+  }
+
+  :is(html.dark, html.dark *) {
+    scrollbar-color: rgb(72 72 72) var(--background);
+  }
+
+  :is(html.dark, html.dark *)::-webkit-scrollbar,
+  :is(html.dark, html.dark *)::-webkit-scrollbar-track,
+  :is(html.dark, html.dark *)::-webkit-scrollbar-corner {
+    background-color: var(--background);
+  }
+
+  :is(html.dark, html.dark *)::-webkit-scrollbar-thumb {
+    border: 3px solid var(--background);
+    border-radius: 999px;
+    background-color: rgb(72 72 72);
+  }
+
   #root {
     min-height: 100%;
   }
@@ -722,7 +742,7 @@
 }
 
 .dark {
-  --background: oklch(0.141 0.006 67.1);
+  --background: #181818;
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.21 0.025 257);
   --card-foreground: oklch(0.985 0 0);
@@ -799,6 +819,10 @@
 .document-page-shell {
   --review-layout-shift-x: 0px;
   transform: translateX(var(--review-layout-shift-x));
+}
+
+.document-page-main {
+  margin-inline: auto;
 }
 
 @media (min-width: 1100px) {

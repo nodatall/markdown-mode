@@ -81,6 +81,49 @@ test.describe("opening local markdown files", () => {
     });
   });
 
+  test("centers the single Markdown reader in View mode below the review-rail breakpoint", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    const filePath = writeProjectFile(
+      projectDir,
+      "centered-reader.md",
+      "# Centered reader\n\nThe reader should sit in the middle of the window.\n",
+    );
+
+    await openMarkdownFile(page, filePath);
+    await expect(page.getByTestId("document-mode-view")).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await expect(page.getByTestId("document-content-card")).toBeVisible();
+
+    const geometry = await page.evaluate(() => {
+      const reader = document.querySelector<HTMLElement>(
+        '[data-testid="document-content-card"]',
+      );
+      if (!reader) throw new Error("Markdown reader column missing");
+
+      const readerBox = reader.getBoundingClientRect();
+      const viewportWidth = document.documentElement.clientWidth;
+      const readerCenter = readerBox.left + readerBox.width / 2;
+      const viewportCenter = viewportWidth / 2;
+
+      return {
+        viewportWidth,
+        viewportCenter,
+        readerLeft: readerBox.left,
+        readerWidth: readerBox.width,
+        readerCenter,
+        centerDelta: readerCenter - viewportCenter,
+      };
+    });
+
+    logE2eEvent("open-file.view-reader-geometry", geometry);
+
+    expect(Math.abs(geometry.centerDelta)).toBeLessThanOrEqual(1);
+  });
+
   test("opens local and external links directly in View mode @smoke", async ({
     page,
   }) => {
