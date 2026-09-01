@@ -54,6 +54,16 @@ export async function enterCommentMode(page: Page) {
   const commentMode = page.getByTestId("document-mode-comment");
   await expect(commentMode).toBeVisible();
 
+  if (await commentMode.isDisabled()) {
+    await page.route("**/api/review-events/status?**", async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ watching: true, watcherCount: 1 }),
+      });
+    });
+    await expect(commentMode).toBeEnabled();
+  }
+
   if ((await commentMode.getAttribute("aria-pressed")) !== "true") {
     await commentMode.click();
   }

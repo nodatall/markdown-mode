@@ -409,7 +409,7 @@ describe("saving/saved status indicator (issue 2 fix)", () => {
   });
 
   it("defaults to icon-only View mode and toggles to Comment mode", async () => {
-    await renderWorkspace();
+    await renderWorkspace({ watcherCount: 1 });
 
     const viewButton = queryByTestId<HTMLButtonElement>(
       container,
@@ -775,7 +775,7 @@ describe("workspace mode controls", () => {
             onKeepEditingWithoutAutosave={() => {}}
             onOverwriteDocumentOnDisk={() => {}}
             onCompleteReview={async () => ({ delivered: false })}
-            backend={createBackend()}
+            backend={createBackend({ watcherCount: 1 })}
           />,
         );
       });

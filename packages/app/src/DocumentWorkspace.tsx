@@ -51,6 +51,7 @@ type ReviewHandoffState =
   | "notified"
   | "undelivered"
   | "error";
+type ReviewWatcherState = "checking" | "connected" | "disconnected";
 type FileCopyAction = "path" | "filename" | "markdown" | "rich-text";
 const FILE_COPY_PREVIEW_MAX_LENGTH = 34;
 const reviewCompleteTitles = [
@@ -312,11 +313,36 @@ export function DocumentSaveStatusIndicator({
 
 function DocumentModeControl({
   mode,
+  reviewWatcherState,
+  allowCommentModeWithoutWatcher = false,
   onModeChange,
 }: {
   mode: DocumentInteractionMode;
+  reviewWatcherState: ReviewWatcherState;
+  allowCommentModeWithoutWatcher?: boolean;
   onModeChange: (mode: DocumentInteractionMode) => void;
 }) {
+  const commentModeActive = mode === "suggesting";
+  const commentModeEnabled =
+    allowCommentModeWithoutWatcher ||
+    reviewWatcherState === "connected" ||
+    commentModeActive;
+  const commentModeTooltip = allowCommentModeWithoutWatcher
+    ? "Comment mode preview"
+    : reviewWatcherState === "connected"
+      ? "Comment mode — agent connected"
+      : commentModeActive
+        ? "Agent disconnected — feedback is still saved"
+        : reviewWatcherState === "checking"
+          ? "Checking for an agent"
+          : "No agent is reviewing this file";
+  const commentModeIndicatorState =
+    reviewWatcherState === "connected"
+      ? "connected"
+      : commentModeActive && reviewWatcherState === "disconnected"
+        ? "disconnected"
+        : null;
+
   return (
     <div
       className="inline-flex shrink-0 items-center gap-0.5 rounded-[8px] border border-stone-300 bg-[#E8E3DB] p-0.5 shadow-[inset_0_1px_0_rgba(255,251,245,0.72)] dark:border-[#292c2a] dark:bg-[#151715] dark:shadow-none"
@@ -350,25 +376,47 @@ function DocumentModeControl({
       <Tooltip>
         <TooltipTrigger
           render={
-            <Button
-              type="button"
-              data-testid="document-mode-comment"
-              aria-label="Comment mode"
-              aria-pressed={mode === "suggesting"}
-              variant="ghost"
-              size="icon-xs"
-              className={cn(
-                "h-6 w-7 rounded-[5px] text-stone-500 hover:bg-[#FFFDFC]/70 hover:text-stone-700 dark:text-[#777c78] dark:hover:bg-[#222522] dark:hover:text-[#bfc3c0]",
-                mode === "suggesting" &&
-                  "bg-[#FFFDFC] text-stone-700 shadow-[0_1px_2px_rgba(41,37,36,0.12)] hover:bg-[#FFFDFC] dark:bg-[#2a2d2b] dark:text-[#e7e9e7] dark:shadow-none dark:hover:bg-[#2a2d2b]",
-              )}
-              onClick={() => onModeChange("suggesting")}
+            <span
+              data-testid="document-mode-comment-trigger"
+              className="inline-flex"
             >
-              <MessageSquare className="size-[0.75rem]" aria-hidden="true" />
-            </Button>
+              <Button
+                type="button"
+                data-testid="document-mode-comment"
+                data-agent-status={reviewWatcherState}
+                aria-label="Comment mode"
+                aria-pressed={commentModeActive}
+                disabled={!commentModeEnabled}
+                variant="ghost"
+                size="icon-xs"
+                className={cn(
+                  "relative h-6 w-7 rounded-[5px] text-stone-500 hover:bg-[#FFFDFC]/70 hover:text-stone-700 dark:text-[#777c78] dark:hover:bg-[#222522] dark:hover:text-[#bfc3c0]",
+                  commentModeActive &&
+                    "bg-[#FFFDFC] text-stone-700 shadow-[0_1px_2px_rgba(41,37,36,0.12)] hover:bg-[#FFFDFC] dark:bg-[#2a2d2b] dark:text-[#e7e9e7] dark:shadow-none dark:hover:bg-[#2a2d2b]",
+                )}
+                onClick={() => onModeChange("suggesting")}
+              >
+                <MessageSquare className="size-[0.75rem]" aria-hidden="true" />
+                {commentModeIndicatorState ? (
+                  <span
+                    data-testid="document-mode-comment-agent-indicator"
+                    data-agent-status={commentModeIndicatorState}
+                    className={cn(
+                      "absolute top-0.5 right-0.5 size-1.5 rounded-full ring-1 ring-[#E8E3DB] dark:ring-[#151715]",
+                      commentModeIndicatorState === "connected"
+                        ? "bg-emerald-500"
+                        : "bg-amber-400",
+                    )}
+                    aria-hidden="true"
+                  />
+                ) : null}
+              </Button>
+            </span>
           }
         />
-        <TooltipContent>Comment mode</TooltipContent>
+        <TooltipContent data-testid="document-mode-comment-tooltip">
+          {commentModeTooltip}
+        </TooltipContent>
       </Tooltip>
     </div>
   );
@@ -441,6 +489,7 @@ interface DocumentWorkspaceProps {
   onCompleteReview: (
     options?: CompleteReviewOptions,
   ) => Promise<{ delivered: boolean }>;
+  allowCommentModeWithoutWatcher?: boolean;
   backend: StorageBackend | null;
 }
 
@@ -461,6 +510,7 @@ export function DocumentWorkspace({
   onKeepEditingWithoutAutosave,
   onOverwriteDocumentOnDisk,
   onCompleteReview,
+  allowCommentModeWithoutWatcher = false,
   backend,
 }: DocumentWorkspaceProps) {
   const [documentInteractionMode, setDocumentInteractionMode] =
@@ -469,6 +519,8 @@ export function DocumentWorkspace({
   const [reviewHandoffState, setReviewHandoffState] =
     useState<ReviewHandoffState>("idle");
   const [reviewWatcherCount, setReviewWatcherCount] = useState(0);
+  const [reviewWatcherState, setReviewWatcherState] =
+    useState<ReviewWatcherState>("checking");
   const [reviewHandoffPopoverOpen, setReviewHandoffPopoverOpen] =
     useState(false);
   const [reviewCompleteTitle, setReviewCompleteTitle] = useState(() =>
@@ -533,19 +585,27 @@ export function DocumentWorkspace({
   useEffect(() => {
     if (!backend?.getReviewWatchStatus || !activeDocumentPath) {
       setReviewWatcherCount(0);
+      setReviewWatcherState("disconnected");
       return;
     }
 
     let cancelled = false;
+    setReviewWatcherCount(0);
+    setReviewWatcherState("checking");
     const refreshWatchStatus = async () => {
       try {
         const status = await backend.getReviewWatchStatus?.(activeDocumentPath);
         if (!cancelled) {
-          setReviewWatcherCount(status?.watcherCount ?? 0);
+          const watcherCount = status?.watcherCount ?? 0;
+          setReviewWatcherCount(watcherCount);
+          setReviewWatcherState(
+            watcherCount > 0 ? "connected" : "disconnected",
+          );
         }
       } catch {
         if (!cancelled) {
           setReviewWatcherCount(0);
+          setReviewWatcherState("disconnected");
         }
       }
     };
@@ -969,6 +1029,8 @@ export function DocumentWorkspace({
           ) : null}
           <DocumentModeControl
             mode={documentInteractionMode}
+            reviewWatcherState={reviewWatcherState}
+            allowCommentModeWithoutWatcher={allowCommentModeWithoutWatcher}
             onModeChange={setDocumentInteractionMode}
           />
         </div>

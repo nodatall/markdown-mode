@@ -1467,6 +1467,7 @@ export function PreviewPage() {
         onKeepEditingWithoutAutosave={() => {}}
         onOverwriteDocumentOnDisk={() => {}}
         onCompleteReview={handleCompletePreviewReview}
+        allowCommentModeWithoutWatcher
         backend={backend}
       />
     </main>

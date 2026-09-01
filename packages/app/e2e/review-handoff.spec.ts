@@ -22,6 +22,87 @@ test.describe("review handoff", () => {
     removeMarkdownProject(projectDir);
   });
 
+  test("enables Comment mode only for a connected agent and preserves an active review across disconnect @smoke", async ({
+    page,
+    request,
+  }) => {
+    const relativePath = "agent-gated-comments.md";
+    const filePath = writeProjectFile(
+      projectDir,
+      relativePath,
+      ["# Agent-gated comments", "", "Review this document.", ""].join("\n"),
+    );
+
+    await openMarkdownFile(page, filePath);
+
+    const commentMode = page.getByTestId("document-mode-comment");
+    const commentModeTrigger = page.getByTestId(
+      "document-mode-comment-trigger",
+    );
+    const connectionIndicator = page.getByTestId(
+      "document-mode-comment-agent-indicator",
+    );
+
+    await expect(commentMode).toBeDisabled();
+    await expect(commentMode).toHaveAttribute(
+      "data-agent-status",
+      "disconnected",
+    );
+    await commentModeTrigger.hover();
+    await expect(page.getByTestId("document-mode-comment-tooltip")).toHaveText(
+      "No agent is reviewing this file",
+    );
+
+    pendingWatch = request.post("/api/review-events/watch", {
+      data: {
+        projectPath: projectDir,
+        path: relativePath,
+        timeoutSeconds: 10,
+      },
+    });
+
+    await expect(commentMode).toBeEnabled();
+    await expect(commentMode).toHaveAttribute("data-agent-status", "connected");
+    await expect(connectionIndicator).toHaveAttribute(
+      "data-agent-status",
+      "connected",
+    );
+
+    await commentMode.click();
+    await expect(commentMode).toHaveAttribute("aria-pressed", "true");
+
+    const releaseResponse = await request.post("/api/review-events", {
+      data: {
+        projectPath: projectDir,
+        path: relativePath,
+      },
+    });
+    expect(releaseResponse.ok()).toBe(true);
+    await pendingWatch;
+
+    await expect(commentMode).toHaveAttribute(
+      "data-agent-status",
+      "disconnected",
+    );
+    await expect(commentMode).toBeEnabled();
+    await expect(commentMode).toHaveAttribute("aria-pressed", "true");
+    await expect(connectionIndicator).toHaveAttribute(
+      "data-agent-status",
+      "disconnected",
+    );
+
+    await page.getByTestId("document-mode-view").click();
+    await expect(commentMode).toBeDisabled();
+    await expect(commentMode).toHaveAttribute("aria-pressed", "false");
+
+    logE2eEvent("review-handoff.comment-agent-gate", {
+      disconnectedInitially: true,
+      enabledWhenConnected: true,
+      activeReviewPreservedAfterDisconnect: true,
+      reentryDisabledAfterReturningToView: true,
+    });
+  });
+
   test("persists an overall handoff comment from the primary done button to YAML endmatter @smoke", async ({
     page,
     request,
